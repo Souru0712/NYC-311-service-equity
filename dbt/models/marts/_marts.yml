@@ -32,8 +32,11 @@ models:
   - name: fct_equity_splits
     description: >
       Aggregated equity fact. Grain: complaint_type × tract × month.
-      equity_score = tract p90 / city-wide p90 for that complaint type and month.
-      Score > 1.0 means slower-than-average service in that tract.
+      equity_score = tract p90 / city_p90, where city_p90 is the MEDIAN of all
+      tract P90s for that complaint type and month (P50-of-tract-P90s baseline).
+      Every tract counts equally regardless of complaint volume — high-volume areas
+      do not skew the citywide reference. Score = 1.0 means this tract matches the
+      median tract experience. Score > 1.0 means slower than the typical tract.
     columns:
       - name: tract_geoid
         tests:

@@ -25,10 +25,17 @@ with st.expander("How to read this page"):
     - **Equity ratio** — bottom ÷ top. A ratio of `2.0×` means the poorest neighborhoods
       wait twice as long as the wealthiest for the same type of complaint
 
+    **How equity score is calculated:**
+    Equity score = this tract's P90 ÷ the **median tract P90** citywide for that complaint type.
+    Every tract counts equally in the baseline regardless of complaint volume — high-volume
+    boroughs do not skew the reference point. A score of 1.0 means this tract matches
+    the *typical NYC neighborhood experience*.
+
     **Bar chart — Avg Equity Score by Income Quintile:**
     - Each bar is one income quintile (1–5)
     - Bar height = average equity score across all tracts in that quintile
-    - The dashed grey line at `1.0` = city average. Bars above it mean that quintile waits longer than average
+    - The dashed line at `1.0` = median tract baseline. Bars above it mean that quintile
+      waits longer than the typical NYC neighborhood for this complaint type
     - A clear upward slope from quintile 5 → 1 confirms a systematic equity gap
 
     **Scatter plot — Income vs P90 Response Time:**
@@ -107,5 +114,6 @@ st.info(
 
 st.caption(
     "Income quintile 1 = lowest income, 5 = highest. "
-    "Equity score > 1.0 means the tract waits longer than the city average for that complaint type."
+    "Equity score = tract P90 ÷ median tract P90 citywide (equal weight per tract). "
+    "Score > 1.0 means this tract waits longer than the typical NYC neighborhood."
 )

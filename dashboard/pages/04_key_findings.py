@@ -218,6 +218,12 @@ The core question: when low-income neighborhoods wait longer for 311 responses, 
 
 with st.expander("How to read this page"):
     st.markdown("""
+    **Equity score methodology:**
+    Equity score = tract P90 ÷ **median tract P90** citywide for that complaint type and month.
+    Every tract counts equally in the baseline — high-volume boroughs do not skew the reference.
+    Score 1.0 = this tract matches the typical NYC neighborhood.
+    Score > 1.0 = residents wait longer than the typical tract.
+
     **Finding 1 — Equity gap by complaint type:**
     Each bar is one complaint type, sized by how much longer Q1 (lowest income) tracts wait
     relative to Q5 (highest income) tracts on average equity score.
@@ -227,7 +233,7 @@ with st.expander("How to read this page"):
 
     **Finding 2 — Borough × income quintile heatmap:**
     Each cell is the average equity score for that borough/quintile combination.
-    Green (≤1.0) = at or below city-average wait. Red (>1.0) = longer than city average.
+    Green (≤1.0) = at or below the median tract baseline. Red (>1.0) = longer than typical.
     - If all quintiles in a borough are red → the whole borough is underserved regardless of income
       (geographic problem).
     - If you see a green-to-red gradient from Q5 → Q1 within every borough → income is the

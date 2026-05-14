@@ -48,9 +48,11 @@ with st.expander("How to read this map"):
     roughly 1,200–8,000 residents. The color represents the **equity score** for the selected complaint type.
 
     **Equity score:**
-    - `1.0` = this tract's P90 response time exactly matches the city average
-    - `> 1.0` = slower than average (e.g. `2.5` = residents wait 2.5× longer than the city median)
-    - `< 1.0` = faster than average
+    - `1.0` = this tract matches the **median** NYC tract for this complaint type
+    - `> 1.0` = slower than the typical tract (e.g. `2.5` = residents wait 2.5× longer)
+    - `< 1.0` = faster than the typical tract
+    The baseline is the **median tract P90** — every tract counts equally regardless of
+    complaint volume, so high-volume areas like Manhattan don't skew the reference.
 
     **Color scale:**
     - 🟢 Green — at or below city average (equity score ≤ 1.0)
@@ -88,6 +90,7 @@ SELECT
     AVG(p75_hours)               AS p75_hours,
     AVG(p90_hours)               AS p90_hours,
     AVG(equity_score)            AS equity_score,
+    AVG(city_p90)                AS city_p90,
     SUM(request_count)           AS complaint_count,
     MAX(median_household_income) AS median_household_income,
     MAX(income_quintile)         AS income_quintile
@@ -153,8 +156,9 @@ fig = px.choropleth_mapbox(
         "county": True,
         "tract_geoid": False,
         "equity_score": ":.2f",
-        "p50_hours": ":.1f",
         "p90_hours": ":.1f",
+        "city_p90": ":.1f",
+        "p50_hours": ":.1f",
         "complaint_count": True,
     },
     labels={
@@ -162,7 +166,8 @@ fig = px.choropleth_mapbox(
         "neighborhood": "Neighborhood",
         "county": "County",
         "p50_hours": "P50 (hrs)",
-        "p90_hours": "P90 (hrs)",
+        "p90_hours": "This tract P90 (hrs)",
+        "city_p90": "Median tract P90 (hrs)",
         "complaint_count": "Complaints",
     },
     title=f"Equity Score — {selected_complaint}",
@@ -175,15 +180,17 @@ st.info(
     "**Neighborhood:** Crown Heights North  \n"
     "**County:** Brooklyn  \n"
     "**Equity Score:** 1.87  \n"
+    "**This tract P90 (hrs):** 112.4  \n"
+    "**Median tract P90 (hrs):** 60.1  \n"
     "**P50 (hrs):** 38.2  \n"
-    "**P90 (hrs):** 112.4  \n"
     "**Complaints:** 643  \n\n"
-    "An equity score of **1.87** means residents in this tract wait nearly **twice as long** "
-    "as the city average for this complaint type to be resolved."
+    "An equity score of **1.87** means residents here wait nearly **twice as long** as the "
+    "**typical NYC neighborhood** (not just a city-wide average skewed by complaint volume). "
+    "The median tract P90 shows the baseline this score is measured against."
 )
 
 st.caption(
-    "Equity score = tract P90 / city-wide P90. "
-    "Green = at or below city average · Yellow = city average (1.0) · Red = above average. "
-    "Color scale adapts to current data — differences between close values are always visible."
+    "Equity score = this tract's P90 ÷ median tract P90 citywide (equal weight per tract, not per complaint). "
+    "Score 1.0 = matches the typical NYC neighborhood. "
+    "Green ≤ 1.0 · Yellow = 1.0 · Red > 1.0."
 )

@@ -31,10 +31,12 @@ with st.expander("How to read this page"):
     **Bar chart — Top 10 Complaint Types by Volume:**
     - Sorted by total complaint count (longest bar = most complaints citywide)
     - Bar color = average equity score for that complaint type across all tracts
-        - 🟢 Green = equity score near 1.0 (fairly distributed service)
-        - 🔴 Red = equity score well above 1.0 (lower-income tracts wait significantly longer)
+        - 🟢 Green = equity score near 1.0 (service matches the typical NYC neighborhood)
+        - 🔴 Red = equity score well above 1.0 (tracts wait significantly longer than typical)
     - High-volume complaint types with red bars are the highest-priority equity issues —
       they affect many residents and the service gap is large
+    - Equity score = tract P90 ÷ **median tract P90** citywide (equal weight per tract,
+      not skewed by complaint volume in any single borough)
 
     **Tip:** Switch to `complaint_count` to identify the highest-volume categories per borough,
     then switch to `p90_hours` to see which ones are the slowest to resolve.
