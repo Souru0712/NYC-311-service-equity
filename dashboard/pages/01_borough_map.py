@@ -170,6 +170,18 @@ fig = px.choropleth_mapbox(
 fig.update_layout(margin={"r": 0, "t": 40, "l": 0, "b": 0}, height=600)
 st.plotly_chart(fig, use_container_width=True)
 
+st.info(
+    "🖱️ **Hover over any shaded tract** to see its details. Example output:\n\n"
+    "**Neighborhood:** Crown Heights North  \n"
+    "**County:** Brooklyn  \n"
+    "**Equity Score:** 1.87  \n"
+    "**P50 (hrs):** 38.2  \n"
+    "**P90 (hrs):** 112.4  \n"
+    "**Complaints:** 643  \n\n"
+    "An equity score of **1.87** means residents in this tract wait nearly **twice as long** "
+    "as the city average for this complaint type to be resolved."
+)
+
 st.caption(
     "Equity score = tract P90 / city-wide P90. "
     "Green = at or below city average · Yellow = city average (1.0) · Red = above average. "
