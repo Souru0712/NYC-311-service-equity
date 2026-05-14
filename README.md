@@ -685,6 +685,15 @@ RAW.ACS_DEMOGRAPHICS
 
 **`fct_equity_splits`** — grain: `complaint_type × tract × month`
 
+> **Equity score methodology — P50 of tract P90s:**
+> `equity_score = tract_p90 / city_p90`, where `city_p90` is the **median of all tract P90s**
+> for that complaint type and month — not a volume-weighted city average.
+> Every tract counts equally in the baseline regardless of complaint volume.
+> This prevents high-volume boroughs (e.g. Manhattan for noise complaints) from skewing
+> the reference point and exaggerating or masking disparities in lower-volume areas.
+> A score of **1.0** means this tract matches the *typical NYC neighborhood*, not merely
+> the city-wide raw average.
+
 | Column | Type | Description |
 |---|---|---|
 | `tract_geoid` | VARCHAR | Census tract ID |
@@ -692,8 +701,9 @@ RAW.ACS_DEMOGRAPHICS
 | `request_month` | DATE | First day of the month |
 | `income_quintile` | INT | 1 = lowest income, 5 = highest |
 | `p50_hours` | FLOAT | Median response time |
-| `p90_hours` | FLOAT | 90th percentile response time |
-| `equity_score` | FLOAT | `tract_p90 / city_p90` — higher = worse service |
+| `p90_hours` | FLOAT | 90th percentile response time for this tract |
+| `city_p90` | FLOAT | Median tract P90 citywide — the equity baseline |
+| `equity_score` | FLOAT | `tract_p90 / city_p90` — higher = worse than typical |
 | `request_count` | INT | Total closed requests in this group |
 
 **`dim_tract`** — grain: one row per NYC census tract
