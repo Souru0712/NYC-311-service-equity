@@ -10,25 +10,142 @@ An end-to-end data pipeline that ingests all NYC 311 service requests, joins the
 
 ## Table of Contents
 
-1. [Prerequisites](#1-prerequisites)
-2. [Clone & Install](#2-clone--install)
-3. [Create Accounts & Credentials](#3-create-accounts--credentials)
-4. [Configure Secrets](#4-configure-secrets)
-5. [Set Up Snowflake](#5-set-up-snowflake)
-6. [Test a Single-Day Ingestion](#6-test-a-single-day-ingestion)
-7. [Run Great Expectations (Raw Suite)](#7-run-great-expectations-raw-suite)
-8. [Run dbt](#8-run-dbt)
-9. [Run the Historical Backfill](#9-run-the-historical-backfill)
-10. [Start Airflow](#10-start-airflow)
-11. [Launch the Dashboard](#11-launch-the-dashboard)
-12. [AI Synthesis](#12-ai-synthesis)
-13. [Project Structure](#13-project-structure)
-14. [Data Model](#14-data-model)
-15. [Troubleshooting](#15-troubleshooting)
+1. [Project Structure](#1-project-structure)
+2. [Prerequisites](#2-prerequisites)
+3. [Clone & Install](#3-clone--install)
+4. [Create Accounts & Credentials](#4-create-accounts--credentials)
+5. [Configure Secrets](#5-configure-secrets)
+6. [Set Up Snowflake](#6-set-up-snowflake)
+7. [Test a Single-Day Ingestion](#7-test-a-single-day-ingestion)
+8. [Run Great Expectations (Raw Suite)](#8-run-great-expectations-raw-suite)
+9. [Run dbt](#9-run-dbt)
+10. [Run the Historical Backfill](#10-run-the-historical-backfill)
+11. [Start Airflow](#11-start-airflow)
+12. [Launch the Dashboard](#12-launch-the-dashboard)
+13. [AI Synthesis](#13-ai-synthesis)
+14. [Troubleshooting](#14-troubleshooting)
 
 ---
 
-## 1. Prerequisites
+## Project Workflow
+
+End-to-end pipeline from raw city data to AI-generated equity insights.
+
+```mermaid
+flowchart TD
+    A["🌐 NYC Open Data\n(Socrata API)\n311 Requests — daily"]:::source
+    B["📊 US Census Bureau\n(ACS API)\nTract demographics — annual"]:::source
+    C["🗺️ Census TIGER\nTract boundaries — GeoJSON"]:::source
+
+    D["⚙️ Python Ingestion\nsocrata_client.py\nacs_client.py\ntract_geometry.py"]:::ingest
+    E["🪣 AWS S3\nraw/ → Parquet\npartitioned by dt=YYYY-MM-DD"]:::storage
+
+    F["❄️ Snowflake RAW\nSOCRATA_311\nACS_DEMOGRAPHICS"]:::warehouse
+
+    G["✅ Great Expectations\nSchema + row count\nvalidation checkpoints"]:::quality
+
+    H["🔧 dbt Staging\nviews — cast, deduplicate\nstg_311_requests\nstg_acs_demographics"]:::transform
+    I["🔧 dbt Intermediate\nincremental merge\nint_311_with_response_time\nresponse_time_hours"]:::transform
+    J["🔧 dbt Marts\nP50-of-tract-P90 equity baseline\nfct_equity_splits\nfct_request_response_time\ndim_tract"]:::transform
+
+    K["🤖 Airflow\ndag_311_daily_incremental\ndag_acs_annual\ndag_311_backfill"]:::orchestrate
+
+    L["📈 Streamlit Dashboard\nBorough Map\nEquity by Income\nComplaint Type Breakdown\nKey Findings"]:::dashboard
+
+    M["🧠 Groq AI\nllama-3.3-70b-versatile\nRoot-cause synthesis\ncached in Snowflake"]:::ai
+
+    A --> D
+    B --> D
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+    H --> I
+    I --> J
+    J --> L
+    J --> M
+    M --> L
+    K -->|"schedules & triggers"| D
+
+    classDef source fill:#1a2744,stroke:#4CC9F0,color:#F0F4FF
+    classDef ingest fill:#1a2744,stroke:#4CC9F0,color:#F0F4FF
+    classDef storage fill:#0d1b2e,stroke:#4CC9F0,color:#F0F4FF
+    classDef warehouse fill:#0d1b2e,stroke:#4CC9F0,color:#F0F4FF
+    classDef quality fill:#1a2744,stroke:#F4A261,color:#F0F4FF
+    classDef transform fill:#1a2744,stroke:#2DC653,color:#F0F4FF
+    classDef orchestrate fill:#0d1b2e,stroke:#E63946,color:#F0F4FF
+    classDef dashboard fill:#1a2744,stroke:#4CC9F0,color:#F0F4FF
+    classDef ai fill:#0d1b2e,stroke:#9B5DE5,color:#F0F4FF
+```
+
+---
+
+## 1. Project Structure
+
+```
+nyc-311-service-equity-mart/
+├── .env.example                    ← copy to .env and fill in
+├── .gitignore
+├── .streamlit/
+│   ├── config.toml                 ← NYC Civic Dark theme
+│   └── secrets.toml                ← Snowflake + Groq credentials (gitignored)
+├── requirements.txt
+├── docker-compose.yml              ← local Airflow
+├── PLAN.md                         ← full technical plan
+│
+├── ingestion/
+│   ├── config.py                   ← reads .env
+│   ├── socrata_client.py           ← Socrata API fetch + watermark logic
+│   ├── acs_client.py               ← Census ACS demographics pull
+│   ├── tract_geometry.py           ← geopandas point-in-polygon spatial join
+│   ├── s3_writer.py                ← write Parquet to S3
+│   ├── snowflake_loader.py         ← COPY INTO Snowflake RAW
+│   └── backfill.py                 ← one-time historical load (2020–present)
+│
+├── dbt/
+│   ├── dbt_project.yml
+│   ├── profiles.yml.example        ← copy to ~/.dbt/profiles.yml
+│   ├── models/
+│   │   ├── staging/                ← views: cast, deduplicate, normalize
+│   │   │   ├── stg_311_requests.sql
+│   │   │   └── stg_acs_demographics.sql
+│   │   ├── intermediate/           ← incremental merge; compute response_time_hours
+│   │   │   └── int_311_with_response_time.sql
+│   │   └── marts/                  ← final analytical tables
+│   │       ├── dim_tract.sql       ← census tract + income quintile
+│   │       ├── fct_request_response_time.sql
+│   │       ├── fct_equity_splits.sql  ← P50-of-tract-P90 equity baseline
+│   │       └── _marts.yml          ← column docs + tests
+│   └── tests/
+│       └── assert_percentile_ordering.sql
+│
+├── great_expectations/
+│   ├── checkpoints/                ← 4 checkpoints, one per pipeline stage
+│   └── expectations/               ← expectation suites (JSON)
+│
+├── airflow/
+│   └── dags/
+│       ├── dag_311_daily_incremental.py   ← runs at 6 AM UTC daily
+│       ├── dag_311_backfill.py            ← manual trigger only
+│       └── dag_acs_annual.py              ← runs Jan 1 each year
+│
+└── dashboard/
+    ├── app.py                      ← Streamlit landing page + complaint reference
+    ├── pages/
+    │   ├── 01_borough_map.py       ← choropleth map with NTA neighborhood hover
+    │   ├── 02_equity_by_income.py  ← equity score by income quintile + scatter
+    │   ├── 03_complaint_type_breakdown.py  ← heatmap + top 10 bar chart
+    │   └── 04_key_findings.py      ← root-cause findings + Groq AI synthesis
+    └── utils/
+        ├── snowflake_conn.py       ← cached Snowflake connection
+        ├── chart_helpers.py        ← reusable Plotly chart functions
+        └── styles.py               ← NYC Civic Dark CSS injection
+```
+
+---
+
+## 2. Prerequisites
 
 Before you begin, make sure you have these installed locally:
 
@@ -47,7 +164,7 @@ You also need accounts for:
 
 ---
 
-## 2. Clone & Install
+## 3. Clone & Install
 
 ```bash
 git clone https://github.com/your-username/nyc-311-service-equity-mart.git
@@ -71,7 +188,7 @@ cd ..
 
 ---
 
-## 3. Create Accounts & Credentials
+## 4. Create Accounts & Credentials
 
 ### Socrata App Token
 1. Go to [data.cityofnewyork.us](https://data.cityofnewyork.us/login) → sign up / log in
@@ -95,7 +212,7 @@ cd ..
 
 ---
 
-## 4. Configure Secrets
+## 5. Configure Secrets
 
 ### Pipeline secrets (`.env`)
 
@@ -177,65 +294,13 @@ role      = "TRANSFORMER"
 
 ---
 
-## 5. Set Up Snowflake
+## 6. Set Up Snowflake
 
-Run these SQL statements once in the Snowflake worksheet (logged in as ACCOUNTADMIN):
-
-```sql
--- Database and schemas
-CREATE DATABASE IF NOT EXISTS NYC_311;
-CREATE SCHEMA IF NOT EXISTS NYC_311.RAW;
-CREATE SCHEMA IF NOT EXISTS NYC_311.STAGING;
-CREATE SCHEMA IF NOT EXISTS NYC_311.INTERMEDIATE;
-CREATE SCHEMA IF NOT EXISTS NYC_311.MARTS;
-
--- Warehouse
-CREATE WAREHOUSE IF NOT EXISTS COMPUTE_WH
-  WAREHOUSE_SIZE = 'XSMALL'
-  AUTO_SUSPEND   = 60
-  AUTO_RESUME    = TRUE;
-
--- Role and user (optional but recommended)
-CREATE USER IF NOT EXISTS user
-  PASSWORD          = 'StrongPassword123!'
-  DEFAULT_ROLE      = TRANSFORMER
-  DEFAULT_WAREHOUSE = COMPUTE_WH
-  DEFAULT_NAMESPACE = NYC_311
-  MUST_CHANGE_PASSWORD = FALSE;
-
-CREATE ROLE IF NOT EXISTS TRANSFORMER;
-GRANT USAGE  ON DATABASE NYC_311                    TO ROLE TRANSFORMER;
-GRANT ALL    ON ALL SCHEMAS IN DATABASE NYC_311     TO ROLE TRANSFORMER;
-GRANT USAGE  ON WAREHOUSE COMPUTE_WH               TO ROLE TRANSFORMER;
-GRANT ROLE TRANSFORMER TO ROLE SYSADMIN;
-GRANT ROLE TRANSFORMER TO USER user;
-
--- S3 external stage (replace with your bucket name and AWS credentials)
-CREATE OR REPLACE STAGE NYC_311.RAW.S3_STAGE
-  URL = 's3://nyc-311-equity-mart/'
-  CREDENTIALS = (
-    AWS_KEY_ID     = 'your_aws_access_key'
-    AWS_SECRET_KEY = 'your_aws_secret_key'
-  )
-  FILE_FORMAT = (TYPE = PARQUET);
-
--- Grant TRANSFORMER access to the stage and all current + future objects
-GRANT ALL ON ALL STAGES IN SCHEMA NYC_311.RAW                    TO ROLE TRANSFORMER;
-GRANT ALL PRIVILEGES ON FUTURE TABLES IN SCHEMA NYC_311.RAW      TO ROLE TRANSFORMER;
-GRANT ALL PRIVILEGES ON FUTURE TABLES IN SCHEMA NYC_311.STAGING  TO ROLE TRANSFORMER;
-GRANT ALL PRIVILEGES ON FUTURE TABLES IN SCHEMA NYC_311.INTERMEDIATE TO ROLE TRANSFORMER;
-GRANT ALL PRIVILEGES ON FUTURE TABLES IN SCHEMA NYC_311.MARTS    TO ROLE TRANSFORMER;
-GRANT ALL PRIVILEGES ON FUTURE STAGES IN SCHEMA NYC_311.RAW      TO ROLE TRANSFORMER;
-GRANT ALL PRIVILEGES ON FUTURE VIEWS  IN SCHEMA NYC_311.STAGING  TO ROLE TRANSFORMER;
-
--- Verify
-SHOW STAGES IN SCHEMA NYC_311.RAW;
-SHOW GRANTS TO ROLE TRANSFORMER;
-```
+Copy and paste [`snowflake/NYC-311-service-equity-example.sql`](snowflake/NYC-311-service-equity-example.sql) (sections 1–2) into a Snowflake worksheet and run as ACCOUNTADMIN.
 
 ---
 
-## 6. Test a Single-Day Ingestion
+## 7. Test a Single-Day Ingestion
 
 Before running the full pipeline, verify the end-to-end flow with one day of data:
 
@@ -258,40 +323,7 @@ Done. Verify in Snowflake:
   SELECT COUNT(*), MAX(ingestion_timestamp) FROM RAW.SOCRATA_311;
 ```
 
-Verify in Snowflake:
-```sql
--- Total rows and last load time (always returns 1 row — the count value is what matters)
-SELECT COUNT(*), MAX(ingestion_timestamp) FROM NYC_311.RAW.SOCRATA_311;
-
--- Rows per load date — more useful for spotting missing or partial runs
-SELECT
-    ingestion_timestamp::DATE AS load_date,
-    COUNT(*)                  AS rows_loaded
-FROM NYC_311.RAW.SOCRATA_311
-GROUP BY 1
-ORDER BY 1 DESC;
-
--- Derive tract_geoid coverage from the raw table.
--- The percentage is logged during ingestion but not stored as a column.
--- Overall coverage:
-SELECT
-    COUNT(*)                                                AS total_rows,
-    COUNT(tract_geoid)                                      AS with_tract,
-    ROUND(100.0 * COUNT(tract_geoid) / COUNT(*), 1)        AS pct_coverage
-FROM NYC_311.RAW.SOCRATA_311;
--- Expect 90–95% overall. Below 85% = spatial join issue.
-
--- Per-month coverage — mirrors what the backfill logs per batch:
-SELECT
-    DATE_TRUNC('month', TO_TIMESTAMP_NTZ(created_date))    AS month,
-    COUNT(*)                                                AS total_rows,
-    COUNT(tract_geoid)                                      AS with_tract,
-    ROUND(100.0 * COUNT(tract_geoid) / COUNT(*), 1)        AS pct_coverage
-FROM NYC_311.RAW.SOCRATA_311
-WHERE created_date IS NOT NULL
-GROUP BY 1
-ORDER BY 1;
-```
+Verify in Snowflake using the queries in [`snowflake/NYC-311-service-equity-example.sql`](snowflake/NYC-311-service-equity-example.sql) (sections 3–4).
 
 > **What the `tract_geoid` coverage percentage means:**
 > Each 311 record is assigned a census tract via a point-in-polygon spatial join using the record's lat/lon coordinates. A record gets `NULL tract_geoid` for four reasons:
@@ -307,7 +339,7 @@ ORDER BY 1;
 
 ---
 
-## 7. Run Great Expectations (Raw Suite)
+## 8. Run Great Expectations (Raw Suite)
 
 Fill in your credentials in `great_expectations/uncommitted/config_variables.yml` — this file is gitignored:
 
@@ -337,7 +369,7 @@ If it fails, each broken expectation is printed with its actual result — most 
 
 ---
 
-## 8. Run dbt
+## 9. Run dbt
 
 ### Set up `profiles.yml` (one time only)
 
@@ -398,29 +430,63 @@ dbt test --select marts
 dbt test
 ```
 
-**Check key output in Snowflake:**
+**Check key output in Snowflake** using [`snowflake/NYC-311-service-equity-example.sql`](snowflake/NYC-311-service-equity-example.sql) (section 6).
 
-```sql
--- Verify marts are populated
-SELECT COUNT(*) FROM NYC_311.MARTS.FCT_EQUITY_SPLITS;
--- Expect > 0 rows (more rows after backfill)
+### Data Model
 
-SELECT COUNT(*) FROM NYC_311.MARTS.DIM_TRACT;
--- Expect ~2168
+**Sources → Raw**
 
--- Sanity-check equity scores
-SELECT complaint_type, AVG(equity_score) AS avg_score
-FROM NYC_311.MARTS.FCT_EQUITY_SPLITS
-GROUP BY 1
-ORDER BY 2 DESC
-LIMIT 10;
--- Scores should be clustered around 1.0, with some outliers
--- All exactly 1.0 = bug in city_p90 join
+| Table | Schema | Description |
+|---|---|---|
+| `SOCRATA_311` | `RAW` | Append-only 311 requests from Socrata. All VARCHAR; dedup in staging. |
+| `ACS_DEMOGRAPHICS` | `RAW` | Census ACS 5-year estimates. Full replace annually. |
+
+**dbt lineage**
+
 ```
+RAW.SOCRATA_311
+    └─► stg_311_requests (view)
+            └─► int_311_with_response_time (incremental merge)
+                    └─► fct_request_response_time (table)  ←── dim_tract
+                                └─► fct_equity_splits (table)  ←── dim_tract
+
+RAW.ACS_DEMOGRAPHICS
+    └─► stg_acs_demographics (view)
+            └─► dim_tract (table)
+```
+
+**`fct_equity_splits`** — grain: `complaint_type × tract × month`
+
+> **Equity score methodology — P50 of tract P90s:**
+> `equity_score = tract_p90 / city_p90`, where `city_p90` is the **median of all tract P90s**
+> for that complaint type and month — not a volume-weighted city average.
+> Every tract counts equally in the baseline regardless of complaint volume.
+> A score of **1.0** means this tract matches the *typical NYC neighborhood*.
+
+| Column | Type | Description |
+|---|---|---|
+| `tract_geoid` | VARCHAR | Census tract ID |
+| `complaint_type` | VARCHAR | 244 distinct types from Socrata |
+| `request_month` | DATE | First day of the month |
+| `income_quintile` | INT | 1 = lowest income, 5 = highest |
+| `p50_hours` | FLOAT | Median response time for this tract |
+| `p90_hours` | FLOAT | 90th percentile response time for this tract |
+| `city_p90` | FLOAT | Median tract P90 citywide — the equity baseline |
+| `equity_score` | FLOAT | `tract_p90 / city_p90` — higher = worse than typical |
+| `request_count` | INT | Total closed requests in this group |
+
+**`dim_tract`** — grain: one row per NYC census tract
+
+| Column | Type | Description |
+|---|---|---|
+| `tract_geoid` | VARCHAR | Census 2020 tract ID (joins to GeoJSON) |
+| `median_household_income` | INT | ACS B19013 |
+| `income_quintile` | INT | NTILE(5) across all NYC tracts by income |
+| `pct_below_poverty` | FLOAT | % of population below federal poverty line |
 
 ---
 
-## 9. Run the Historical Backfill
+## 10. Run the Historical Backfill
 
 This loads all NYC 311 data from 2020 to the present. Run it **once**, manually, outside of Airflow:
 
@@ -452,7 +518,7 @@ dbt run --select marts
 
 ---
 
-## 10. Start Airflow
+## 11. Start Airflow
 
 Airflow runs locally via Docker Compose and takes over daily incremental loads.
 
@@ -521,7 +587,7 @@ docker-compose down
 
 ---
 
-## 11. Launch the Dashboard
+## 12. Launch the Dashboard
 
 ```bash
 streamlit run dashboard/app.py
@@ -547,7 +613,7 @@ Open **http://localhost:8501** in your browser.
 
 ---
 
-## 12. AI Synthesis
+## 13. AI Synthesis
 
 The **Key Findings** page includes an AI-generated root-cause assessment and actionable recommendations, produced by [Groq](https://console.groq.com) (free tier, no credit card required) using the `llama-3.3-70b-versatile` model.
 
@@ -585,16 +651,7 @@ account   = "..."
 ...
 ```
 
-3. Create the cache table in Snowflake (the app also creates it automatically on startup):
-
-```sql
-CREATE TABLE IF NOT EXISTS MARTS.AI_SYNTHESIS_CACHE (
-    data_hash      VARCHAR PRIMARY KEY,
-    status         VARCHAR DEFAULT 'pending',
-    synthesis_text VARCHAR,
-    generated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+3. Create the cache table by running the DDL in [`snowflake/NYC-311-service-equity-example.sql`](snowflake/NYC-311-service-equity-example.sql) (section 7) in Snowflake. The app also creates it automatically on startup.
 
 4. Launch the dashboard, navigate to **Key Findings**, and click **Generate AI Analysis**. The button disappears after the first successful generation and the synthesis persists indefinitely.
 
@@ -604,120 +661,7 @@ Groq free tier: **30 requests per minute**, resets every minute. At most one req
 
 ---
 
-## 13. Project Structure
-
-
-```
-nyc-311-service-equity-mart/
-├── .env.example                    ← copy to .env and fill in
-├── .gitignore
-├── requirements.txt
-├── docker-compose.yml              ← local Airflow
-├── PLAN.md                         ← full technical plan
-│
-├── ingestion/
-│   ├── config.py                   ← reads .env
-│   ├── socrata_client.py           ← API fetch + watermark
-│   ├── acs_client.py               ← Census ACS pull
-│   ├── tract_geometry.py           ← geopandas sjoin
-│   ├── s3_writer.py                ← write Parquet to S3
-│   ├── snowflake_loader.py         ← COPY INTO Snowflake
-│   └── backfill.py                 ← one-time historical load
-│
-├── dbt/
-│   ├── dbt_project.yml
-│   ├── profiles.yml.example        ← copy to ~/.dbt/profiles.yml
-│   ├── models/
-│   │   ├── staging/                ← views; rename + cast raw data
-│   │   ├── intermediate/           ← incremental merge; compute response_time_hours
-│   │   └── marts/                  ← dim_tract, fct_request_response_time, fct_equity_splits
-│   └── tests/
-│       └── assert_percentile_ordering.sql
-│
-├── great_expectations/
-│   ├── checkpoints/                ← 4 checkpoints, one per pipeline stage
-│   └── expectations/               ← expectation suites (JSON)
-│
-├── airflow/
-│   └── dags/
-│       ├── dag_311_daily_incremental.py   ← runs at 6 AM UTC daily
-│       ├── dag_311_backfill.py            ← manual trigger only
-│       └── dag_acs_annual.py              ← runs Jan 1 each year
-│
-└── dashboard/
-    ├── app.py                      ← Streamlit entrypoint
-    ├── pages/
-    │   ├── 01_borough_map.py
-    │   ├── 02_equity_by_income.py
-    │   ├── 03_complaint_breakdown.py
-    │   └── 04_key_findings.py
-    └── utils/
-        ├── snowflake_conn.py       ← cached Snowflake connection
-        └── chart_helpers.py        ← reusable Plotly helpers
-```
-
----
-
-## 13. Data Model
-
-### Sources → Raw
-
-| Table | Schema | Description |
-|---|---|---|
-| `SOCRATA_311` | `RAW` | Append-only 311 requests from Socrata. All VARCHAR; dedup in staging. |
-| `ACS_DEMOGRAPHICS` | `RAW` | Census ACS 5-year estimates. Full replace annually. |
-
-### dbt Models
-
-```
-RAW.SOCRATA_311
-    └─► stg_311_requests (view)
-            └─► int_311_with_response_time (incremental merge)
-                    └─► fct_request_response_time (table)  ←── dim_tract
-                                └─► fct_equity_splits (table)  ←── dim_tract
-
-RAW.ACS_DEMOGRAPHICS
-    └─► stg_acs_demographics (view)
-            └─► dim_tract (table)
-```
-
-### Key Mart Columns
-
-**`fct_equity_splits`** — grain: `complaint_type × tract × month`
-
-> **Equity score methodology — P50 of tract P90s:**
-> `equity_score = tract_p90 / city_p90`, where `city_p90` is the **median of all tract P90s**
-> for that complaint type and month — not a volume-weighted city average.
-> Every tract counts equally in the baseline regardless of complaint volume.
-> This prevents high-volume boroughs (e.g. Manhattan for noise complaints) from skewing
-> the reference point and exaggerating or masking disparities in lower-volume areas.
-> A score of **1.0** means this tract matches the *typical NYC neighborhood*, not merely
-> the city-wide raw average.
-
-| Column | Type | Description |
-|---|---|---|
-| `tract_geoid` | VARCHAR | Census tract ID |
-| `complaint_type` | VARCHAR | e.g. `RODENT`, `HEAT/HOT WATER` |
-| `request_month` | DATE | First day of the month |
-| `income_quintile` | INT | 1 = lowest income, 5 = highest |
-| `p50_hours` | FLOAT | Median response time |
-| `p90_hours` | FLOAT | 90th percentile response time for this tract |
-| `city_p90` | FLOAT | Median tract P90 citywide — the equity baseline |
-| `equity_score` | FLOAT | `tract_p90 / city_p90` — higher = worse than typical |
-| `request_count` | INT | Total closed requests in this group |
-
-**`dim_tract`** — grain: one row per NYC census tract
-
-| Column | Type | Description |
-|---|---|---|
-| `tract_geoid` | VARCHAR | Census 2020 tract ID (joins to GeoJSON) |
-| `median_household_income` | INT | ACS B19013 |
-| `income_quintile` | INT | NTILE(5) across all NYC tracts |
-| `pct_below_poverty` | FLOAT | % of population below federal poverty line |
-
----
-
-## 15. Troubleshooting
+## 14. Troubleshooting
 
 **`COPY INTO` returns 0 rows**
 - Check the external stage: `SHOW STAGES IN SCHEMA NYC_311.RAW;`
