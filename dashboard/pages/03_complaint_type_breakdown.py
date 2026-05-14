@@ -112,11 +112,13 @@ st.plotly_chart(fig, use_container_width=True)
 
 st.caption(
     "Bar length = total complaints filed citywide. "
-    "Bar color = average equity score across all tracts for that complaint type. "
-    "🔴 **Red = equity score well above 1.0** — lower-income tracts wait significantly longer "
-    "than the typical NYC neighborhood for this type, pointing to an agency response disparity. "
-    "🟢 **Green = equity score near 1.0** — service is distributed relatively evenly across "
-    "neighborhoods regardless of income. "
-    "High-volume bars that are red are the highest-priority equity issues — "
-    "they affect the most residents and the service gap is the largest."
+    "Bar color = average equity score across **all tracts** for that complaint type — "
+    "this is city-wide, not broken down by income. "
+    "🔴 **Red = high average equity score** — this complaint type has long resolution times "
+    "across the entire city, meaning the responsible agency is not resolving it efficiently "
+    "regardless of neighborhood. It is an agency performance issue. "
+    "🟢 **Green = average equity score near 1.0** — the agency resolves this type consistently "
+    "and quickly across NYC. "
+    "A high-volume red bar is the most urgent signal: the agency is struggling to keep up "
+    "with a complaint type that affects a large number of residents citywide."
 )
