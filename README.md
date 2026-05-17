@@ -21,9 +21,10 @@ An end-to-end data pipeline that ingests all NYC 311 service requests, joins the
 9. [Run dbt](#9-run-dbt)
 10. [Run the Historical Backfill](#10-run-the-historical-backfill)
 11. [Start Airflow](#11-start-airflow)
-12. [Launch the Dashboard](#12-launch-the-dashboard)
-13. [AI Synthesis](#13-ai-synthesis)
-14. [Troubleshooting](#14-troubleshooting)
+12. [GitHub Actions (CI & Scheduled Pipeline)](#12-github-actions-ci--scheduled-pipeline)
+13. [Launch the Dashboard](#13-launch-the-dashboard)
+14. [AI Synthesis](#14-ai-synthesis)
+15. [Troubleshooting](#15-troubleshooting)
 
 ---
 
@@ -587,7 +588,79 @@ docker-compose down
 
 ---
 
-## 12. Launch the Dashboard
+## 12. GitHub Actions (CI & Scheduled Pipeline)
+
+Two workflows live in `.github/workflows/`. Neither requires a local Docker stack.
+
+### Workflows at a glance
+
+| File | Trigger | What it does | Secrets needed |
+|---|---|---|---|
+| `ci.yml` | Push / PR to `main` (code files only) | Lint Python with `ruff`; validate all dbt SQL compiles with `dbt parse` | None |
+| `pipeline.yml` | Daily 6 AM UTC schedule **or** manual dispatch | Full pipeline: watermark → Socrata → S3 → Snowflake → dbt | Yes (see below) |
+
+### `ci.yml` — Continuous Integration
+
+Runs automatically on every push or pull request to `main` whenever Python or dbt files change. Skips runs triggered by changes to docs, config, or the snowflake directory — no minutes wasted on non-code changes.
+
+- **lint**: runs `ruff` over `ingestion/`, `dashboard/`, and `scripts/`
+- **dbt-parse**: installs `dbt-snowflake`, writes a dummy `profiles.yml`, and runs `dbt parse` — validates every model's Jinja and SQL without a live Snowflake connection
+
+Both jobs run on `ubuntu-24.04` in parallel and are capped at 15 minutes each. The `concurrency` setting cancels any in-progress run for the same branch if you push again, so rapid iteration costs one run instead of many.
+
+### `pipeline.yml` — Scheduled Data Pipeline
+
+Replaces the need for a locally running Airflow container for the daily incremental load.
+
+**Daily schedule (`cron: 0 6 * * *`):**
+1. Reads `MAX(resolution_action_updated_date)` from `RAW.SOCRATA_311` in Snowflake — this is the watermark
+2. Applies a 48-hour safety buffer (catches late-arriving Socrata writes and open→closed transitions)
+3. Fetches all records updated since the watermark from the Socrata API
+4. Spatial-joins each record to a NYC census tract (`tract_geoid`)
+5. Writes a dated Parquet file to S3 (`raw/socrata_311/ingestion_date=YYYY-MM-DD/`)
+6. `COPY INTO` Snowflake `RAW.SOCRATA_311`
+7. Runs `dbt run --select staging`, then `intermediate`, then `marts`
+
+**Manual backfill (`workflow_dispatch` with `start_year`):**
+
+Go to **Actions → Pipeline → Run workflow** in the GitHub UI, enter a start year (e.g. `2020`), and click Run. The job iterates month-by-month from that year to the present, writing each month to a fixed S3 key (idempotent — safe to re-run). After ingestion, dbt rebuilds all layers.
+
+> This is the same logic as `python -m ingestion.backfill` but runs in GitHub's infrastructure instead of your local machine. The one-time historical backfill in [Step 10](#10-run-the-historical-backfill) should still be run locally first since it can take 2–3 hours — GitHub Actions jobs time out at 6 hours and free-tier minutes are finite.
+
+### Required GitHub Secrets
+
+Go to **Settings → Secrets and variables → Actions → New repository secret** and add:
+
+| Secret | Where to find it |
+|---|---|
+| `SOCRATA_APP_TOKEN` | NYC Open Data developer settings |
+| `SOCRATA_DATASET_ID` | `erm2-nwe9` |
+| `AWS_ACCESS_KEY_ID` | IAM user access key |
+| `AWS_SECRET_ACCESS_KEY` | IAM user access key |
+| `AWS_DEFAULT_REGION` | e.g. `us-east-1` |
+| `S3_BUCKET` | e.g. `nyc-311-equity-mart` |
+| `SNOWFLAKE_ACCOUNT` | e.g. `abc12345.us-east-1` |
+| `SNOWFLAKE_USER` | Snowflake login |
+| `SNOWFLAKE_PASSWORD` | Snowflake login |
+| `SNOWFLAKE_WAREHOUSE` | `COMPUTE_WH` |
+| `SNOWFLAKE_DATABASE` | `NYC_311` |
+| `SNOWFLAKE_ROLE` | `TRANSFORMER` |
+
+These mirror the values in your local `.env` file exactly.
+
+### Free-tier minute budget
+
+GitHub Free gives 2,000 minutes/month for private repos (`ubuntu` runners bill at 1×).
+
+| Workflow | Avg runtime | Frequency | Monthly total |
+|---|---|---|---|
+| `ci.yml` (both jobs) | ~8 min | ~10 runs (pushes + PRs) | ~80 min |
+| `pipeline.yml` daily | ~25 min | 30 runs | ~750 min |
+| **Total** | | | **~830 min — 42% of free quota** |
+
+---
+
+## 13. Launch the Dashboard
 
 ```bash
 streamlit run dashboard/app.py
@@ -613,7 +686,7 @@ Open **http://localhost:8501** in your browser.
 
 ---
 
-## 13. AI Synthesis
+## 14. AI Synthesis
 
 The **Key Findings** page includes an AI-generated root-cause assessment and actionable recommendations, produced by [Groq](https://console.groq.com) (free tier, no credit card required) using the `llama-3.3-70b-versatile` model.
 
@@ -661,7 +734,7 @@ Groq free tier: **30 requests per minute**, resets every minute. At most one req
 
 ---
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 **`COPY INTO` returns 0 rows**
 - Check the external stage: `SHOW STAGES IN SCHEMA NYC_311.RAW;`

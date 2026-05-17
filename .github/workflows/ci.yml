@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ingestion/**"
+      - "dashboard/**"
+      - "scripts/**"
+      - "dbt/models/**"
+      - "dbt/tests/**"
+      - "dbt/macros/**"
+      - "dbt/dbt_project.yml"
+      - "dbt/packages.yml"
+      - "requirements.txt"
+      - ".github/workflows/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "ingestion/**"
+      - "dashboard/**"
+      - "scripts/**"
+      - "dbt/models/**"
+      - "dbt/tests/**"
+      - "dbt/macros/**"
+      - "dbt/dbt_project.yml"
+      - "dbt/packages.yml"
+      - "requirements.txt"
+      - ".github/workflows/**"
+
+# Cancel any in-progress run for the same branch/PR — saves minutes on rapid pushes
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ruff
+        run: pip install ruff==0.4.7
+
+      - name: Lint
+        run: ruff check ingestion/ dashboard/ scripts/
+
+  dbt-parse:
+    name: dbt parse
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dbt-snowflake
+        run: pip install dbt-snowflake==1.8.4
+
+      # dbt parse only validates Jinja + SQL — no live Snowflake connection needed
+      - name: Write dummy profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << 'EOF'
+          nyc_311_equity:
+            target: dev
+            outputs:
+              dev:
+                type: snowflake
+                account: dummy
+                user: dummy
+                password: dummy
+                role: TRANSFORMER
+                database: NYC_311
+                warehouse: COMPUTE_WH
+                schema: STAGING
+                threads: 1
+          EOF
+
+      - name: dbt deps
+        working-directory: dbt
+        run: dbt deps
+
+      - name: dbt parse
+        working-directory: dbt
+        run: dbt parse
