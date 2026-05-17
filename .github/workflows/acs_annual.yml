@@ -1,0 +1,86 @@
+name: ACS Annual Refresh
+
+on:
+  schedule:
+    - cron: "0 8 1 1 *"   # Jan 1, 8 AM UTC — ACS vintage released prior December
+  workflow_dispatch:
+    inputs:
+      vintage_year:
+        description: "ACS vintage year to load (e.g. 2024). Defaults to current year - 2."
+        required: false
+        default: ""
+
+concurrency:
+  group: acs-annual
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: ACS demographics refresh
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SOCRATA_APP_TOKEN:     ${{ secrets.SOCRATA_APP_TOKEN }}
+      SOCRATA_DATASET_ID:    ${{ secrets.SOCRATA_DATASET_ID }}
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION:    ${{ secrets.AWS_DEFAULT_REGION }}
+      S3_BUCKET:             ${{ secrets.S3_BUCKET }}
+      SNOWFLAKE_ACCOUNT:     ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER:        ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PASSWORD:    ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_WAREHOUSE:   ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE:    ${{ secrets.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_ROLE:        ${{ secrets.SNOWFLAKE_ROLE }}
+      CENSUS_API_KEY:        ${{ secrets.CENSUS_API_KEY }}
+      VINTAGE_YEAR:          ${{ github.event.inputs.vintage_year }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install \
+            boto3==1.35.0 \
+            requests==2.32.3 \
+            pandas==2.1.3 \
+            pyarrow==17.0.0 \
+            snowflake-connector-python==3.12.0 \
+            dbt-snowflake==1.8.4 \
+            python-dotenv==1.0.1
+
+      - name: Write dbt profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << EOF
+          nyc_311_equity:
+            target: dev
+            outputs:
+              dev:
+                type: snowflake
+                account: $SNOWFLAKE_ACCOUNT
+                user: $SNOWFLAKE_USER
+                password: $SNOWFLAKE_PASSWORD
+                role: $SNOWFLAKE_ROLE
+                database: $SNOWFLAKE_DATABASE
+                warehouse: $SNOWFLAKE_WAREHOUSE
+                schema: STAGING
+                threads: 4
+          EOF
+
+      # VINTAGE_YEAR env var is read by load_acs.py; falls back to current year - 2 if blank
+      - name: Load ACS demographics → S3 → Snowflake
+        run: python scripts/load_acs.py
+
+      - name: dbt deps
+        working-directory: dbt
+        run: dbt deps
+
+      - name: dbt run (ACS models only)
+        working-directory: dbt
+        run: dbt run --select stg_acs_demographics dim_tract

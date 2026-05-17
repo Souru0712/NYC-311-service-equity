@@ -14,8 +14,10 @@ ACS releases each December with a ~13-month lag:
 Requires CENSUS_API_KEY in .env.
 After the initial load, this is handled annually by dag_acs_annual.py.
 """
+import os
 import sys
 import warnings
+from datetime import date
 
 # snowflake-connector-python uses a deprecated pandas API internally — suppress until connector is updated
 warnings.filterwarnings("ignore", category=FutureWarning, module="snowflake")
@@ -31,9 +33,9 @@ from ingestion.snowflake_loader import get_connection, create_raw_acs_table, tru
 def main() -> None:
     cfg = Config()
 
-    # 2024 vintage covers survey responses from 2020-2024.
-    # Released December 2025 — latest available as of May 2026.
-    vintage_year = 2024
+    # ACS releases each December with ~13-month lag (2024 vintage → Dec 2025).
+    # Default: current year - 2. Override with VINTAGE_YEAR env var (set by acs_annual.yml).
+    vintage_year = int(os.environ.get("VINTAGE_YEAR") or date.today().year - 2)
     coverage_start = vintage_year - 4
 
     print(f"Fetching ACS {vintage_year} 5-year estimates "

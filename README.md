@@ -4,7 +4,7 @@
 
 An end-to-end data pipeline that ingests all NYC 311 service requests, joins them to census tract demographics, and surfaces response-time equity gaps in an interactive dashboard.
 
-**Stack**: Socrata API → Airflow → S3 → Snowflake → dbt → Great Expectations → Streamlit → Groq (AI)
+**Stack**: Socrata API → GitHub Actions → S3 → Snowflake → dbt → Streamlit → Groq (AI)
 
 ---
 
@@ -17,14 +17,12 @@ An end-to-end data pipeline that ingests all NYC 311 service requests, joins the
 5. [Configure Secrets](#5-configure-secrets)
 6. [Set Up Snowflake](#6-set-up-snowflake)
 7. [Test a Single-Day Ingestion](#7-test-a-single-day-ingestion)
-8. [Run Great Expectations (Raw Suite)](#8-run-great-expectations-raw-suite)
-9. [Run dbt](#9-run-dbt)
-10. [Run the Historical Backfill](#10-run-the-historical-backfill)
-11. [Start Airflow](#11-start-airflow)
-12. [GitHub Actions (CI & Scheduled Pipeline)](#12-github-actions-ci--scheduled-pipeline)
-13. [Launch the Dashboard](#13-launch-the-dashboard)
-14. [AI Synthesis](#14-ai-synthesis)
-15. [Troubleshooting](#15-troubleshooting)
+8. [Run dbt](#8-run-dbt)
+9. [Run the Historical Backfill](#9-run-the-historical-backfill)
+10. [GitHub Actions (CI & Scheduled Pipeline)](#10-github-actions-ci--scheduled-pipeline)
+11. [Launch the Dashboard](#11-launch-the-dashboard)
+12. [AI Synthesis](#12-ai-synthesis)
+13. [Troubleshooting](#13-troubleshooting)
 
 ---
 
@@ -43,13 +41,11 @@ flowchart TD
 
     F["❄️ Snowflake RAW\nSOCRATA_311\nACS_DEMOGRAPHICS"]:::warehouse
 
-    G["✅ Great Expectations\nSchema + row count\nvalidation checkpoints"]:::quality
-
     H["🔧 dbt Staging\nviews — cast, deduplicate\nstg_311_requests\nstg_acs_demographics"]:::transform
     I["🔧 dbt Intermediate\nincremental merge\nint_311_with_response_time\nresponse_time_hours"]:::transform
     J["🔧 dbt Marts\nP50-of-tract-P90 equity baseline\nfct_equity_splits\nfct_request_response_time\ndim_tract"]:::transform
 
-    K["🤖 Airflow\ndag_311_daily_incremental\ndag_acs_annual\ndag_311_backfill"]:::orchestrate
+    K["⚙️ GitHub Actions\npipeline.yml (daily + backfill)\nacs_annual.yml (Jan 1)\nci.yml (push/PR)"]:::orchestrate
 
     L["📈 Streamlit Dashboard\nBorough Map\nEquity by Income\nComplaint Type Breakdown\nKey Findings"]:::dashboard
 
@@ -60,8 +56,7 @@ flowchart TD
     C --> D
     D --> E
     E --> F
-    F --> G
-    G --> H
+    F --> H
     H --> I
     I --> J
     J --> L
@@ -73,7 +68,6 @@ flowchart TD
     classDef ingest fill:#1a2744,stroke:#4CC9F0,color:#F0F4FF
     classDef storage fill:#0d1b2e,stroke:#4CC9F0,color:#F0F4FF
     classDef warehouse fill:#0d1b2e,stroke:#4CC9F0,color:#F0F4FF
-    classDef quality fill:#1a2744,stroke:#F4A261,color:#F0F4FF
     classDef transform fill:#1a2744,stroke:#2DC653,color:#F0F4FF
     classDef orchestrate fill:#0d1b2e,stroke:#E63946,color:#F0F4FF
     classDef dashboard fill:#1a2744,stroke:#4CC9F0,color:#F0F4FF
@@ -88,11 +82,15 @@ flowchart TD
 nyc-311-service-equity-mart/
 ├── .env.example                    ← copy to .env and fill in
 ├── .gitignore
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                  ← lint + dbt parse on push/PR
+│       ├── pipeline.yml            ← daily 311 incremental + manual backfill
+│       └── acs_annual.yml          ← ACS demographics refresh, Jan 1 each year
 ├── .streamlit/
 │   ├── config.toml                 ← NYC Civic Dark theme
 │   └── secrets.toml                ← Snowflake + Groq credentials (gitignored)
 ├── requirements.txt
-├── docker-compose.yml              ← local Airflow
 ├── PLAN.md                         ← full technical plan
 │
 ├── ingestion/
@@ -121,15 +119,8 @@ nyc-311-service-equity-mart/
 │   └── tests/
 │       └── assert_percentile_ordering.sql
 │
-├── great_expectations/
-│   ├── checkpoints/                ← 4 checkpoints, one per pipeline stage
-│   └── expectations/               ← expectation suites (JSON)
-│
-├── airflow/
-│   └── dags/
-│       ├── dag_311_daily_incremental.py   ← runs at 6 AM UTC daily
-│       ├── dag_311_backfill.py            ← manual trigger only
-│       └── dag_acs_annual.py              ← runs Jan 1 each year
+├── snowflake/
+│   └── NYC-311-service-equity-example.sql  ← setup + verification queries
 │
 └── dashboard/
     ├── app.py                      ← Streamlit landing page + complaint reference
@@ -303,25 +294,19 @@ Copy and paste [`snowflake/NYC-311-service-equity-example.sql`](snowflake/NYC-31
 
 ## 7. Test a Single-Day Ingestion
 
-Before running the full pipeline, verify the end-to-end flow with one day of data:
+Before enabling the scheduled pipeline, verify the end-to-end flow. This script reads the watermark from Snowflake and fetches everything since then — the same logic the daily GitHub Actions job runs:
 
 ```bash
-python scripts/test_single_day.py
+python scripts/run_incremental.py
 ```
 
 **Expected output:**
 ```
-Fetching records updated since 2025-01-14 06:00 UTC ...
-  Fetched 8,432 rows  |  columns: ['unique_key', 'created_date', 'closed_date', ...]
-Downloading / loading tract boundaries ...
-  tract_geoid coverage: 93.2%  (expect ~90-95%, see note below)
-Writing Parquet to S3 ...
-  Written to: s3://nyc-311-equity-mart/raw/socrata_311/ingestion_date=test-run/part-0001.parquet
-Loading into Snowflake RAW.SOCRATA_311 ...
-  Rows loaded: 8,432
-
-Done. Verify in Snowflake:
-  SELECT COUNT(*), MAX(ingestion_timestamp) FROM RAW.SOCRATA_311;
+Watermark: 2025-01-14T04:00:00+00:00 (48 h buffer applied)
+Fetched 8,432 rows
+tract_geoid coverage: 93.2%
+Written to: s3://nyc-311-equity-mart/raw/socrata_311/ingestion_date=2025-01-14/part-0001.parquet
+Loaded 8,432 rows into Snowflake
 ```
 
 Verify in Snowflake using the queries in [`snowflake/NYC-311-service-equity-example.sql`](snowflake/NYC-311-service-equity-example.sql) (sections 3–4).
@@ -340,37 +325,7 @@ Verify in Snowflake using the queries in [`snowflake/NYC-311-service-equity-exam
 
 ---
 
-## 8. Run Great Expectations (Raw Suite)
-
-Fill in your credentials in `great_expectations/uncommitted/config_variables.yml` — this file is gitignored:
-
-```yaml
-SNOWFLAKE_USER: "your_user"
-SNOWFLAKE_PASSWORD: "your_password"
-SNOWFLAKE_ACCOUNT: "your_account_identifier"
-SNOWFLAKE_WAREHOUSE: "COMPUTE_WH"
-SNOWFLAKE_ROLE: "TRANSFORMER"
-```
-
-Run the checkpoint via the helper script from the project root:
-
-```bash
-python scripts/run_ge_checkpoint.py raw_311_socrata_checkpoint
-```
-
-**Expected output:**
-```
-Running checkpoint: raw_311_socrata_checkpoint ...
-
-✓ raw_311_socrata_checkpoint PASSED
-  7/7 expectations passed
-```
-
-If it fails, each broken expectation is printed with its actual result — most commonly `expect_table_row_count_to_be_between` (empty pull) or lat/lon bounds (check your Socrata API token).
-
----
-
-## 9. Run dbt
+## 8. Run dbt
 
 ### Set up `profiles.yml` (one time only)
 
@@ -487,9 +442,9 @@ RAW.ACS_DEMOGRAPHICS
 
 ---
 
-## 10. Run the Historical Backfill
+## 9. Run the Historical Backfill
 
-This loads all NYC 311 data from 2020 to the present. Run it **once**, manually, outside of Airflow:
+This loads all NYC 311 data from 2020 to the present. Run it **once**, manually, before enabling the scheduled pipeline:
 
 ```bash
 python -m ingestion.backfill
@@ -519,76 +474,7 @@ dbt run --select marts
 
 ---
 
-## 11. Start Airflow
-
-Airflow runs locally via Docker Compose and takes over daily incremental loads.
-
-### How the daily increment works
-
-The DAG runs at 6 AM UTC every day and only processes records updated since the last run — not the full 35M rows.
-
-**Watermark — where the DAG picks up from:**
-```python
-watermark = MAX(resolution_action_updated_date FROM RAW.SOCRATA_311) - 48h
-```
-The watermark is read from the data already in Snowflake, not from the clock. This means:
-- If the container was off for 3 days, the next run fetches all 3 days automatically
-- Missing days are always recovered on the next run regardless of how long the gap was
-
-**Why the 48-hour buffer exists — two reasons:**
-
-*1. Late-arriving Socrata writes:* When a 311 request closes, Socrata can take hours to reflect the updated `resolution_action_updated_date` in the API. Without the buffer, records updated just before the watermark cutoff could be missed entirely.
-
-*2. Open → closed transitions:* A request created in January may stay open for weeks before closing in February. When it closes, its `resolution_action_updated_date` changes. The buffer ensures that closure is always captured on the next run.
-
-The buffer works together with dbt's `incremental_strategy='merge'` in `int_311_with_response_time`:
-```
-Jan 15: request created → loaded with response_time_hours = NULL (still open)
-Feb 3:  request closes  → watermark catches it → dbt MERGE updates the existing row
-                          response_time_hours = DATEDIFF(Jan 15, Feb 3) = 19 days
-```
-Without both mechanisms, open requests would never get their response times calculated — they would stay NULL forever.
-
-**`catchup=False` — what happens if the container is off:**
-Airflow does not replay missed scheduled runs. When the container restarts, it runs the next scheduled instance only. The missed DAG executions are skipped — but because the watermark is data-driven, the next run automatically fetches everything since the last successful load. No data is lost.
-
-```bash
-# First time only — initialize the Airflow DB and create admin user
-docker-compose up airflow-init
-
-# Start all services (webserver + scheduler + postgres)
-docker-compose up -d
-
-# Check they're running
-docker-compose ps
-```
-
-Open the Airflow UI at **http://localhost:8080** — login: `admin` / `admin`
-
-**Enable the DAGs:**
-1. Find `nyc_311_daily_incremental` → toggle it **On**
-2. Find `dag_acs_annual` → toggle it **On**
-3. Leave `dag_311_backfill` Off (manual trigger only)
-
-**Trigger a manual test run:**
-1. Click `nyc_311_daily_incremental` → **Trigger DAG** (▶ button)
-2. Watch the task graph — all tasks should turn green within ~10 minutes
-
-**To trigger a backfill for a specific month via Airflow:**
-```bash
-docker-compose exec airflow-webserver \
-  airflow dags trigger dag_311_backfill \
-  --conf '{"year": 2023, "month": 6}'
-```
-
-**To stop Airflow:**
-```bash
-docker-compose down
-```
-
----
-
-## 12. GitHub Actions (CI & Scheduled Pipeline)
+## 10. GitHub Actions (CI & Scheduled Pipeline)
 
 Two workflows live in `.github/workflows/`. Neither requires a local Docker stack.
 
@@ -597,7 +483,8 @@ Two workflows live in `.github/workflows/`. Neither requires a local Docker stac
 | File | Trigger | What it does | Secrets needed |
 |---|---|---|---|
 | `ci.yml` | Push / PR to `main` (code files only) | Lint Python with `ruff`; validate all dbt SQL compiles with `dbt parse` | None |
-| `pipeline.yml` | Daily 6 AM UTC schedule **or** manual dispatch | Full pipeline: watermark → Socrata → S3 → Snowflake → dbt | Yes (see below) |
+| `pipeline.yml` | Daily 6 AM UTC schedule **or** manual dispatch | Full 311 pipeline: watermark → Socrata → S3 → Snowflake → dbt | Yes (see below) |
+| `acs_annual.yml` | Jan 1 8 AM UTC **or** manual dispatch | ACS demographics refresh → S3 → Snowflake → dbt `dim_tract` | Yes (see below) |
 
 ### `ci.yml` — Continuous Integration
 
@@ -610,7 +497,7 @@ Both jobs run on `ubuntu-24.04` in parallel and are capped at 15 minutes each. T
 
 ### `pipeline.yml` — Scheduled Data Pipeline
 
-Replaces the need for a locally running Airflow container for the daily incremental load.
+Handles the daily incremental load on a schedule — no local server required.
 
 **Daily schedule (`cron: 0 6 * * *`):**
 1. Reads `MAX(resolution_action_updated_date)` from `RAW.SOCRATA_311` in Snowflake — this is the watermark
@@ -652,15 +539,17 @@ These mirror the values in your local `.env` file exactly.
 
 GitHub Free gives 2,000 minutes/month for private repos (`ubuntu` runners bill at 1×).
 
-| Workflow | Avg runtime | Frequency | Monthly total |
-|---|---|---|---|
-| `ci.yml` (both jobs) | ~8 min | ~10 runs (pushes + PRs) | ~80 min |
-| `pipeline.yml` daily | ~25 min | 30 runs | ~750 min |
-| **Total** | | | **~830 min — 42% of free quota** |
+| Workflow | Job | What it does | Avg runtime | Frequency | Monthly total |
+|---|---|---|---|---|---|
+| `ci.yml` | `lint` | Runs `ruff` over `ingestion/`, `dashboard/`, `scripts/` — catches unused imports, bare f-strings, style errors | ~2 min | ~10 runs | ~20 min |
+| `ci.yml` | `dbt-parse` | Installs `dbt-snowflake`, writes a dummy `profiles.yml`, runs `dbt parse` — validates every model's Jinja and SQL without a live Snowflake connection | ~6 min | ~10 runs | ~60 min |
+| `pipeline.yml` | `run` | Watermark → Socrata fetch → spatial join → S3 → Snowflake COPY → dbt staging + intermediate + marts | ~25 min | 30 runs | ~750 min |
+| `acs_annual.yml` | `refresh` | Census ACS fetch → S3 → Snowflake → dbt `stg_acs_demographics` + `dim_tract` | ~15 min | 1 run (Jan 1) | ~15 min |
+| **Total** | | | | | **~845 min — 42% of free quota** |
 
 ---
 
-## 13. Launch the Dashboard
+## 11. Launch the Dashboard
 
 ```bash
 streamlit run dashboard/app.py
@@ -686,7 +575,7 @@ Open **http://localhost:8501** in your browser.
 
 ---
 
-## 14. AI Synthesis
+## 12. AI Synthesis
 
 The **Key Findings** page includes an AI-generated root-cause assessment and actionable recommendations, produced by [Groq](https://console.groq.com) (free tier, no credit card required) using the `llama-3.3-70b-versatile` model.
 
@@ -734,7 +623,7 @@ Groq free tier: **30 requests per minute**, resets every minute. At most one req
 
 ---
 
-## 15. Troubleshooting
+## 13. Troubleshooting
 
 **`COPY INTO` returns 0 rows**
 - Check the external stage: `SHOW STAGES IN SCHEMA NYC_311.RAW;`
