@@ -22,10 +22,10 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="snowflake")
 
 sys.path.insert(0, ".")
 
-from ingestion.config import Config
-from ingestion.acs_client import fetch_nyc_acs
-from ingestion.s3_writer import write_parquet_to_s3
-from ingestion.snowflake_loader import get_connection, create_raw_acs_table, truncate_and_load_acs
+from ingestion.config import Config  # noqa: E402
+from ingestion.acs_client import fetch_nyc_acs  # noqa: E402
+from ingestion.s3_writer import write_parquet_to_s3  # noqa: E402
+from ingestion.snowflake_loader import get_connection, create_raw_acs_table, truncate_and_load_acs  # noqa: E402
 
 
 def main() -> None:
@@ -41,7 +41,7 @@ def main() -> None:
     df = fetch_nyc_acs(api_key=cfg.census_api_key, vintage_year=vintage_year)
     print(f"  Fetched {len(df):,} tracts  (expect 2,300–2,400 — includes water-only and special tracts)")
 
-    print(f"Writing to S3 ...")
+    print("Writing to S3 ...")
     s3_uri = write_parquet_to_s3(
         df,
         bucket=cfg.s3_bucket,
@@ -59,8 +59,8 @@ def main() -> None:
     truncate_and_load_acs(sf, df)
     sf.close()
 
-    print(f"\nDone. Verify in Snowflake:")
-    print(f"  SELECT COUNT(*), MAX(vintage_year) FROM NYC_311.RAW.ACS_DEMOGRAPHICS;")
+    print("\nDone. Verify in Snowflake:")
+    print("  SELECT COUNT(*), MAX(vintage_year) FROM NYC_311.RAW.ACS_DEMOGRAPHICS;")
     print(f"  -- Expect 2,300–2,400 rows | vintage_year = {vintage_year} | survey years {coverage_start}–{vintage_year}")
 
 

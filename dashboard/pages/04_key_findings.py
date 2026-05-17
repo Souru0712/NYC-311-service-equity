@@ -61,7 +61,6 @@ def _load_cached_synthesis(data_hash: str) -> tuple[str, str] | None:
             'complete' — ready to display.
     """
     from utils.snowflake_conn import get_snowflake_conn
-    import pandas as pd
     try:
         conn = get_snowflake_conn()
         cur = conn.cursor()

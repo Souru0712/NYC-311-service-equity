@@ -9,8 +9,6 @@ import logging
 from calendar import monthrange
 from datetime import datetime, timezone
 
-import pandas as pd
-
 from ingestion.config import Config
 from ingestion.socrata_client import records_to_dataframe
 from ingestion.tract_geometry import download_tract_geojson, assign_tract_geoid

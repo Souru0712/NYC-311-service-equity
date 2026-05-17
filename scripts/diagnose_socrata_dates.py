@@ -20,7 +20,7 @@ def main() -> None:
     client = Socrata("data.cityofnewyork.us", cfg.socrata_app_token, timeout=60)
 
     print(f"Dataset: {cfg.socrata_dataset_id}")
-    print(f"Checking data availability by year ...\n")
+    print("Checking data availability by year ...\n")
 
     years = [2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
 
