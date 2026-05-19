@@ -22,7 +22,8 @@ class Config:
     snowflake_database: str = field(default_factory=lambda: os.getenv("SNOWFLAKE_DATABASE", "NYC_311"))
     snowflake_role: str = field(default_factory=lambda: os.getenv("SNOWFLAKE_ROLE", "TRANSFORMER"))
 
-    census_api_key: str = field(default_factory=lambda: os.environ["CENSUS_API_KEY"])
+    # Only required by load_acs.py / acs_annual.yml — not needed for 311 ingestion
+    census_api_key: str | None = field(default_factory=lambda: os.getenv("CENSUS_API_KEY"))
 
     snowflake_stage: str = "RAW.S3_STAGE"
     snowflake_raw_table: str = "RAW.SOCRATA_311"
