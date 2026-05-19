@@ -1,5 +1,6 @@
 from groq import Groq
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from utils.snowflake_conn import run_query
@@ -240,12 +241,7 @@ with st.expander("How to read this page"):
     - The most actionable pattern is a borough where Q1 is deeply red but Q5 is green —
       same city, same agency, different treatment.
 
-    **Finding 3 — Equity gap trend over time:**
-    Two lines: Q1 (red) and Q5 (blue). The dashed line at 1.0 = city-wide average.
-    A widening gap means the disparity is growing. A narrowing gap means policy or operations
-    are starting to correct it. Seasonal spikes reflect periods where demand outpaces capacity
-    unevenly across income groups.
-    """)
+""")
 
 st.divider()
 
@@ -355,10 +351,11 @@ if not gap_df.empty:
 
     st.markdown("**Agency breakdown for the above complaint types:**")
     st.table(
-        gap_df[["complaint_type", "agency", "q1_avg_equity", "q5_avg_equity", "equity_gap"]]
+        gap_df[["complaint_type", "agency", "total_requests", "q1_avg_equity", "q5_avg_equity", "equity_gap"]]
         .rename(columns={
             "complaint_type": "Complaint Type",
             "agency": "Agency",
+            "total_requests": "Total Requests",
             "q1_avg_equity": "Q1 Avg Equity",
             "q5_avg_equity": "Q5 Avg Equity",
             "equity_gap": "Gap (Q1−Q5)",
@@ -426,6 +423,14 @@ over time. A widening gap signals that inequity is systemic and worsening.
 A narrowing gap signals that targeted policy or resource changes are having an effect.
 """)
 
+seasonal_trend = st.checkbox(
+    "View by season instead of month",
+    value=False,
+    help="Collapses monthly data into Spring / Summer / Fall / Winter averages "
+         "so structural trends stand out from month-to-month noise.",
+)
+
+# Always fetch monthly — used for the chart (monthly mode) and AI synthesis
 trend_sql = """
 SELECT
     request_month,
@@ -439,24 +444,73 @@ ORDER BY request_month
 trend_df = run_query(trend_sql)
 
 if not trend_df.empty:
-    trend_df["income_quintile"] = trend_df["income_quintile"].map(
-        {1: "Q1 — lowest income", 5: "Q5 — highest income"}
+    import pandas as pd
+
+    if seasonal_trend:
+        # Aggregate monthly data to seasons in pandas — avoids a second SQL query
+        temp = trend_df.copy()
+        temp["month"] = pd.to_datetime(temp["request_month"]).dt.month
+        temp["yr"]    = pd.to_datetime(temp["request_month"]).dt.year
+        _season_name  = {1:"Winter",2:"Winter",3:"Spring",4:"Spring",5:"Spring",
+                         6:"Summer",7:"Summer",8:"Summer",9:"Fall",10:"Fall",11:"Fall",12:"Winter"}
+        _season_order = {1:1,2:1,3:2,4:2,5:2,6:3,7:3,8:3,9:4,10:4,11:4,12:1}
+        temp["season"]       = temp["month"].map(_season_name)
+        temp["season_order"] = temp["month"].map(_season_order)
+        seasonal_agg = (
+            temp.groupby(["yr","season","season_order","income_quintile"])["avg_equity_score"]
+            .mean().reset_index()
+            .sort_values(["yr","season_order"])
+        )
+        seasonal_agg["period"] = seasonal_agg["yr"].astype(str) + " " + seasonal_agg["season"]
+        period_order = seasonal_agg[["yr","season_order","period"]].drop_duplicates() \
+                           .sort_values(["yr","season_order"])["period"].tolist()
+        q1 = seasonal_agg[seasonal_agg["income_quintile"]==1].set_index("period").reindex(period_order).reset_index()
+        q5 = seasonal_agg[seasonal_agg["income_quintile"]==5].set_index("period").reindex(period_order).reset_index()
+    else:
+        period_order = sorted(trend_df["request_month"].unique())
+        trend_df["period"] = trend_df["request_month"]
+        q1 = trend_df[trend_df["income_quintile"]==1].set_index("period").reindex(period_order).reset_index()
+        q5 = trend_df[trend_df["income_quintile"]==5].set_index("period").reindex(period_order).reset_index()
+
+    view_label = "Season" if seasonal_trend else "Month"
+    trend_fig = go.Figure()
+    trend_fig.add_trace(go.Scatter(
+        x=q5["period"], y=q5["avg_equity_score"],
+        name="Q5 — highest income", mode="lines+markers",
+        line=dict(color="#4C9BE8", width=2), marker=dict(size=5),
+        hovertemplate="<b>%{x}</b><br>Q5 avg equity score: %{y:.3f}<extra></extra>",
+    ))
+    trend_fig.add_trace(go.Scatter(
+        x=q1["period"], y=q1["avg_equity_score"],
+        name="Q1 — lowest income", mode="lines+markers",
+        line=dict(color="#E84C4C", width=2), marker=dict(size=5),
+        fill="tonexty", fillcolor="rgba(232, 76, 76, 0.12)",
+        hovertemplate="<b>%{x}</b><br>Q1 avg equity score: %{y:.3f}<extra></extra>",
+    ))
+    trend_fig.add_hline(y=1.0, line_dash="dash", line_color="grey",
+                        annotation_text="City median (1.0)", annotation_position="top left")
+    trend_fig.update_layout(
+        title=f"Q1 vs Q5 Avg Equity Score by {view_label}",
+        xaxis_title=view_label, yaxis_title="Avg Equity Score",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        hovermode="x unified", height=480, margin=dict(t=60, b=20),
     )
-    fig = px.line(
-        trend_df,
-        x="request_month",
-        y="avg_equity_score",
-        color="income_quintile",
-        markers=True,
-        labels={"request_month": "Month", "avg_equity_score": "Avg Equity Score"},
-        title="Equity score over time — Q1 vs Q5",
-        color_discrete_map={
-            "Q1 — lowest income": "#E84C4C",
-            "Q5 — highest income": "#4C9BE8",
-        },
+    st.plotly_chart(trend_fig, use_container_width=True)
+
+    st.caption(
+        "**How to read this chart:** "
+        "The **red line (Q1)** is the average equity score for the lowest-income 20% of NYC census tracts; "
+        "**blue (Q5)** is the highest-income 20%. "
+        "Both lines sitting above 1.0 means both groups wait longer than the city median — but the "
+        "**shaded area between them is the inequality**: the wider it is, the more response times favour "
+        "wealthier neighbourhoods. "
+        "A **widening gap** means the disparity is growing; a **narrowing gap** means operations or policy "
+        "changes are having an effect. "
+        "Seasonal spikes — particularly summer peaks — reflect complaint surges (noise, heat) that agencies "
+        "absorb unevenly across income levels. "
+        "Use **monthly view** to pinpoint individual spikes; switch to **seasonal view** to see structural "
+        "patterns without month-to-month noise."
     )
-    fig.add_hline(y=1.0, line_dash="dash", line_color="grey", annotation_text="City average (1.0)")
-    st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("No data found — run the pipeline first.")
 
@@ -484,8 +538,10 @@ if not gap_df.empty and not heatmap_df.empty and not trend_df.empty and not head
         for r in heatmap_df.to_dict("records")
     )
 
-    trend_q1 = trend_df[trend_df["income_quintile"].str.startswith("Q1")].sort_values("request_month")
-    trend_q5 = trend_df[trend_df["income_quintile"].str.startswith("Q5")].sort_values("request_month")
+    # Always use monthly trend for AI synthesis regardless of display mode
+    trend_monthly = trend_df.copy()
+    trend_q1 = trend_monthly[trend_monthly["income_quintile"] == 1].sort_values("request_month")
+    trend_q5 = trend_monthly[trend_monthly["income_quintile"] == 5].sort_values("request_month")
     def _trend_line(df, label):
         if df.empty:
             return f"  {label}: no data"
