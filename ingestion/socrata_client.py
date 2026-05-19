@@ -24,7 +24,10 @@ def get_watermark(sf_conn, table: str = "RAW.SOCRATA_311") -> datetime:
         watermark = datetime.now(timezone.utc) - timedelta(hours=48)
         logger.info("Table empty or missing — watermark set to %s", watermark)
     else:
-        if hasattr(max_ts, "tzinfo") and max_ts.tzinfo is None:
+        # RAW table stores dates as VARCHAR ISO strings — parse before arithmetic
+        if isinstance(max_ts, str):
+            max_ts = datetime.fromisoformat(max_ts.replace("Z", "+00:00"))
+        if max_ts.tzinfo is None:
             max_ts = max_ts.replace(tzinfo=timezone.utc)
         watermark = max_ts - timedelta(hours=48)
         logger.info("Watermark from table MAX: %s", watermark)
