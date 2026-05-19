@@ -295,7 +295,15 @@ between Q1 and Q5 tracts. A larger gap means the city's response is *more unequa
 complaint type. The **Agency** column identifies who is accountable for closing it.
 """)
 
-gap_sql = """
+min_volume_filter = st.checkbox(
+    "Only show complaint types with 500+ total requests",
+    value=True,
+    help="Excludes low-volume types (e.g. Cranes & Derricks: 191 requests) whose equity gap "
+         "is statistically unreliable and skews the chart.",
+)
+volume_clause = "AND total_requests >= 500" if min_volume_filter else ""
+
+gap_sql = f"""
 WITH gaps AS (
     SELECT
         complaint_type,
@@ -315,6 +323,7 @@ SELECT
 FROM gaps
 WHERE q1_avg IS NOT NULL
   AND q5_avg IS NOT NULL
+  {volume_clause}
 ORDER BY equity_gap DESC
 LIMIT 10
 """

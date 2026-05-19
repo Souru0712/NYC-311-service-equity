@@ -45,69 +45,112 @@ with st.expander("How to read this map"):
     st.markdown("""
     **What you're looking at:**
     Each shaded polygon is a NYC census tract — a small neighborhood unit defined by the Census Bureau,
-    roughly 1,200–8,000 residents. The color represents the **equity score** for the selected complaint type.
+    roughly 1,200–8,000 residents. The color represents the **equity score** for the selected filter.
 
     **Equity score:**
-    - `1.0` = this tract matches the **median** NYC tract for this complaint type
+    - `1.0` = this tract matches the **median** NYC tract
     - `> 1.0` = slower than the typical tract (e.g. `2.5` = residents wait 2.5× longer)
     - `< 1.0` = faster than the typical tract
-    The baseline is the **median tract P90** — every tract counts equally regardless of
-    complaint volume, so high-volume areas like Manhattan don't skew the reference.
+
+    **Filter modes:**
+    - **Complaint type** — equity score for one complaint category across all income levels
+    - **Income quintile** — average equity score across all complaint types for the selected income group(s); Q1 = lowest income, Q5 = highest
 
     **Color scale:**
     - 🟢 Green — at or below city average (equity score ≤ 1.0)
     - 🟡 Yellow — at the city average (equity score = 1.0)
     - 🔴 Red — significantly above average
-    The scale adapts to the current data so color differences are always meaningful.
-
-    **Navigating the map:**
-    - Scroll to zoom in/out · Click and drag to pan
-    - **Hover** over any tract to see its borough, tract number, equity score, response times, and complaint count
-    - Use the **Complaint type** dropdown to switch categories
-    - Use the **Borough** multiselect to narrow the view
-    - Grey tracts have no data for the selected complaint type
-
-    **P90 explained:**
-    P90 is the 90th percentile response time — 90% of complaints in that tract resolved within
-    this many hours. It captures the worst-case experience rather than the average.
     """)
 
 COMPLAINT_QUERY = "SELECT DISTINCT complaint_type FROM MARTS.FCT_EQUITY_SPLITS ORDER BY 1"
-boroughs = ["BRONX", "BROOKLYN", "MANHATTAN", "QUEENS", "STATEN ISLAND"]
+BOROUGHS = ["BRONX", "BROOKLYN", "MANHATTAN", "QUEENS", "STATEN ISLAND"]
+QUINTILE_OPTIONS = ["Q1", "Q2", "Q3", "Q4", "Q5"]
+QUINTILE_MAP = {"Q1": 1, "Q2": 2, "Q3": 3, "Q4": 4, "Q5": 5}
 
 complaint_types = run_query(COMPLAINT_QUERY)["complaint_type"].tolist()
 
-col1, col2 = st.columns(2)
-selected_complaint = col1.selectbox("Complaint type", complaint_types, index=0)
-selected_boroughs = col2.multiselect("Borough", boroughs, default=boroughs)
+# ── Filter mode toggle ────────────────────────────────────────────────────────
+filter_mode = st.radio(
+    "Filter by",
+    ["Complaint type", "Income quintile"],
+    horizontal=True,
+)
 
-borough_filter = "', '".join(selected_boroughs)
-sql = f"""
-SELECT
-    tract_geoid,
-    complaint_type,
-    AVG(p50_hours)               AS p50_hours,
-    AVG(p75_hours)               AS p75_hours,
-    AVG(p90_hours)               AS p90_hours,
-    AVG(equity_score)            AS equity_score,
-    AVG(city_p90)                AS city_p90,
-    SUM(request_count)           AS complaint_count,
-    MAX(median_household_income) AS median_household_income,
-    MAX(income_quintile)         AS income_quintile
-FROM MARTS.FCT_EQUITY_SPLITS
-WHERE complaint_type = '{selected_complaint}'
-  AND borough IN ('{borough_filter}')
-GROUP BY tract_geoid, complaint_type
-"""
+col1, col2 = st.columns(2)
+
+if filter_mode == "Complaint type":
+    selected_complaint = col1.selectbox("Complaint type", complaint_types, index=0)
+    selected_quintiles = list(QUINTILE_MAP.values())  # all quintiles included
+    selected_quintile_labels = QUINTILE_OPTIONS
+else:
+    selected_quintile_labels = col1.multiselect(
+        "Income quintile",
+        QUINTILE_OPTIONS,
+        default=QUINTILE_OPTIONS,
+    )
+    selected_quintiles = [QUINTILE_MAP[q] for q in selected_quintile_labels]
+    selected_complaint = None
+
+selected_boroughs = col2.multiselect("Borough", BOROUGHS, default=BOROUGHS)
+
+# ── Validation ────────────────────────────────────────────────────────────────
+if not selected_boroughs:
+    st.warning("Select at least one borough.")
+    st.stop()
+
+if filter_mode == "Income quintile" and not selected_quintiles:
+    st.warning("Select at least one income quintile.")
+    st.stop()
+
+# ── Query ─────────────────────────────────────────────────────────────────────
+borough_filter   = "', '".join(selected_boroughs)
+quintile_filter  = ", ".join(str(q) for q in selected_quintiles)
+
+if filter_mode == "Complaint type":
+    sql = f"""
+    SELECT
+        tract_geoid,
+        complaint_type,
+        AVG(p50_hours)               AS p50_hours,
+        AVG(p90_hours)               AS p90_hours,
+        AVG(equity_score)            AS equity_score,
+        AVG(city_p90)                AS city_p90,
+        SUM(request_count)           AS complaint_count,
+        MAX(median_household_income) AS median_household_income,
+        MAX(income_quintile)         AS income_quintile
+    FROM MARTS.FCT_EQUITY_SPLITS
+    WHERE complaint_type = '{selected_complaint}'
+      AND borough IN ('{borough_filter}')
+    GROUP BY tract_geoid, complaint_type
+    """
+    map_title = f"Equity Score — {selected_complaint}"
+else:
+    sql = f"""
+    SELECT
+        tract_geoid,
+        AVG(p50_hours)               AS p50_hours,
+        AVG(p90_hours)               AS p90_hours,
+        AVG(equity_score)            AS equity_score,
+        AVG(city_p90)                AS city_p90,
+        SUM(request_count)           AS complaint_count,
+        MAX(median_household_income) AS median_household_income,
+        MAX(income_quintile)         AS income_quintile
+    FROM MARTS.FCT_EQUITY_SPLITS
+    WHERE income_quintile IN ({quintile_filter})
+      AND borough IN ('{borough_filter}')
+    GROUP BY tract_geoid
+    """
+    map_title = f"Equity Score — Income Quintile {', '.join(selected_quintile_labels)}"
+
 df = run_query(sql)
 
 if df.empty:
     st.warning("No data for this selection.")
     st.stop()
 
-# Neighborhood name from NTA crosswalk; falls back to county name if lookup fails
+# ── Enrich with neighborhood names ────────────────────────────────────────────
 _nta = _load_nta_lookup()
-df["county"] = df["tract_geoid"].apply(_county_from_geoid)
+df["county"]       = df["tract_geoid"].apply(_county_from_geoid)
 df["neighborhood"] = df["tract_geoid"].map(_nta).fillna(df["county"])
 
 
@@ -137,6 +180,32 @@ def load_tract_geojson() -> dict:
 
 geojson = load_tract_geojson()
 
+# ── Choropleth ────────────────────────────────────────────────────────────────
+hover = {
+    "neighborhood":          True,
+    "county":                True,
+    "tract_geoid":           False,
+    "equity_score":          ":.2f",
+    "p90_hours":             ":.1f",
+    "city_p90":              ":.1f",
+    "p50_hours":             ":.1f",
+    "complaint_count":       True,
+    "income_quintile":       True,
+    "median_household_income": True,
+}
+
+labels = {
+    "equity_score":            "Equity Score",
+    "neighborhood":            "Neighborhood",
+    "county":                  "Borough",
+    "p50_hours":               "P50 (hrs)",
+    "p90_hours":               "This tract P90 (hrs)",
+    "city_p90":                "Median tract P90 (hrs)",
+    "complaint_count":         "Complaints",
+    "income_quintile":         "Income Quintile",
+    "median_household_income": "Median Income ($)",
+}
+
 fig = px.choropleth_mapbox(
     df,
     geojson=geojson,
@@ -144,33 +213,14 @@ fig = px.choropleth_mapbox(
     featureidkey="properties.tract_geoid",
     color="equity_score",
     color_continuous_scale="RdYlGn_r",
-    # No fixed range — scale adapts to actual data distribution so close values
-    # remain visually distinguishable. Midpoint pinned at 1.0 so yellow = city average.
     color_continuous_midpoint=1.0,
     mapbox_style="carto-positron",
     zoom=10,
     center={"lat": 40.7128, "lon": -74.0060},
     opacity=0.7,
-    hover_data={
-        "neighborhood": True,
-        "county": True,
-        "tract_geoid": False,
-        "equity_score": ":.2f",
-        "p90_hours": ":.1f",
-        "city_p90": ":.1f",
-        "p50_hours": ":.1f",
-        "complaint_count": True,
-    },
-    labels={
-        "equity_score": "Equity Score",
-        "neighborhood": "Neighborhood",
-        "county": "County",
-        "p50_hours": "P50 (hrs)",
-        "p90_hours": "This tract P90 (hrs)",
-        "city_p90": "Median tract P90 (hrs)",
-        "complaint_count": "Complaints",
-    },
-    title=f"Equity Score — {selected_complaint}",
+    hover_data=hover,
+    labels=labels,
+    title=map_title,
 )
 fig.update_layout(margin={"r": 0, "t": 40, "l": 0, "b": 0}, height=600)
 st.plotly_chart(fig, use_container_width=True)
@@ -178,15 +228,14 @@ st.plotly_chart(fig, use_container_width=True)
 st.info(
     "🖱️ **Hover over any shaded tract** to see its details. Example output:\n\n"
     "**Neighborhood:** Crown Heights North  \n"
-    "**County:** Brooklyn  \n"
+    "**Borough:** Brooklyn  \n"
     "**Equity Score:** 1.87  \n"
     "**This tract P90 (hrs):** 112.4  \n"
     "**Median tract P90 (hrs):** 60.1  \n"
     "**P50 (hrs):** 38.2  \n"
     "**Complaints:** 643  \n\n"
     "An equity score of **1.87** means residents here wait nearly **twice as long** as the "
-    "**typical NYC neighborhood** (not just a city-wide average skewed by complaint volume). "
-    "The median tract P90 shows the baseline this score is measured against."
+    "**typical NYC neighborhood**."
 )
 
 st.caption(
