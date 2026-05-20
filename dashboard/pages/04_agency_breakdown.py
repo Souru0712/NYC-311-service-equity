@@ -133,10 +133,11 @@ sql = f"""
 SELECT
     complaint_type,
     income_quintile,
-    SUM(request_count) AS total_requests,
-    AVG(equity_score)  AS avg_equity_score
+    SUM(request_count)    AS total_requests,
+    MEDIAN(equity_score)  AS avg_equity_score
 FROM MARTS.FCT_EQUITY_SPLITS
 WHERE request_month BETWEEN '{start_date}' AND '{end_date}'
+  AND request_count >= 10
 GROUP BY complaint_type, income_quintile
 """
 with st.spinner("Loading agency data..."):

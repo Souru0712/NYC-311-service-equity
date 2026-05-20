@@ -1,0 +1,72 @@
+version: 2
+
+models:
+  - name: fct_equity_quintile_summary
+    description: >
+      Equity comparison WITHIN each complaint type, at complaint_type ×
+      income_quintile grain. Built as median-of-(tract-level P90), with a
+      30-complaint floor per tract cell. Reports raw hours; no ratios stored.
+      The across-complaint-type aggregate is intentionally absent because it
+      inverts due to complaint-mix confounding.
+    columns:
+      - name: complaint_type
+        tests: [not_null]
+      - name: income_quintile
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5]
+      - name: n_tracts
+        tests: [not_null]
+      - name: n_complaints
+        tests: [not_null]
+      - name: median_tract_p90_hours
+        tests: [not_null]
+      - name: median_tract_p50_hours
+        tests: [not_null]
+    # composite uniqueness: one row per complaint_type × quintile
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [complaint_type, income_quintile]
+
+  - name: fct_equity_gap_by_type
+    description: >
+      Q1-vs-Q5 equity gap per complaint type — the project's headline. Gap is
+      a single ratio of two median-P90-hour numbers. Both quintiles must clear
+      a 500-complaint floor, which excludes small-sample artifacts such as
+      Cranes & Derricks (191 complaints citywide). q1_over_q5_gap > 1.0 means
+      low-income tracts wait longer.
+    columns:
+      - name: complaint_type
+        tests: [not_null, unique]
+      - name: q1_over_q5_gap
+        tests:
+          - not_null
+          # a sane gap; flags if a model change reintroduces an explosion
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 25
+      - name: q1_p90_hours
+        tests: [not_null]
+      - name: q5_p90_hours
+        tests: [not_null]
+
+  - name: fct_equity_trend_monthly
+    description: >
+      Median / P90 response time by income quintile over time (Finding 3).
+      Quintile-pooled per month — NOT an equity-gap series; inherits the
+      complaint-mix confound, so label it as a "response time trend", not an
+      "equity gap trend".
+    columns:
+      - name: month
+        tests: [not_null]
+      - name: income_quintile
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5]
+      - name: p90_hours
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [month, income_quintile]

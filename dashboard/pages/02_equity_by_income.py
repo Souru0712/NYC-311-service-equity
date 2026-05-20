@@ -94,11 +94,12 @@ date_filter = f"AND request_month BETWEEN '{start_date}' AND '{end_date}'"
 quintile_sql = f"""
 SELECT
     income_quintile,
-    AVG(equity_score)           AS avg_equity_score,
-    AVG(p90_hours)              AS avg_p90_hours,
+    MEDIAN(equity_score)        AS avg_equity_score,
+    MEDIAN(p90_hours)           AS avg_p90_hours,
     SUM(request_count)          AS total_complaints
 FROM MARTS.FCT_EQUITY_SPLITS
 WHERE complaint_type = '{selected_complaint}'
+  AND request_count >= 10
   {date_filter}
 GROUP BY income_quintile
 ORDER BY income_quintile
@@ -114,9 +115,9 @@ bottom = quintile_df[quintile_df["income_quintile"] == 1]["avg_p90_hours"].value
 top = quintile_df[quintile_df["income_quintile"] == 5]["avg_p90_hours"].values
 if bottom.size and top.size and top[0]:
     col1, col2, col3 = st.columns(3)
-    col1.metric("Q1 P90 (hrs)", f"{bottom[0]:.1f}")
-    col2.metric("Q5 P90 (hrs)", f"{top[0]:.1f}")
-    col3.metric("Equity ratio (Q1 / Q5)", f"{bottom[0] / top[0]:.2f}×")
+    col1.metric("Q1 median P90 (hrs)", f"{bottom[0]:.1f}")
+    col2.metric("Q5 median P90 (hrs)", f"{top[0]:.1f}")
+    col3.metric("P90 ratio (Q1 / Q5)", f"{bottom[0] / top[0]:.2f}×")
 
 st.plotly_chart(
     equity_bar(
@@ -148,12 +149,13 @@ SELECT
     complaint_type,
     borough,
     MAX(median_household_income) AS median_household_income,
-    AVG(p90_hours)               AS p90_hours,
-    AVG(equity_score)            AS equity_score,
+    MEDIAN(p90_hours)            AS p90_hours,
+    MEDIAN(equity_score)         AS equity_score,
     SUM(request_count)           AS complaint_count
 FROM MARTS.FCT_EQUITY_SPLITS
 WHERE complaint_type = '{selected_complaint}'
   AND p90_hours IS NOT NULL
+  AND request_count >= 10
   {date_filter}
 GROUP BY tract_geoid, complaint_type, borough
 """

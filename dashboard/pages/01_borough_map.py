@@ -144,16 +144,17 @@ if filter_mode == "Complaint type":
     SELECT
         tract_geoid,
         complaint_type,
-        AVG(p50_hours)               AS p50_hours,
-        AVG(p90_hours)               AS p90_hours,
-        AVG(equity_score)            AS equity_score,
-        AVG(city_p90)                AS city_p90,
+        MEDIAN(p50_hours)            AS p50_hours,
+        MEDIAN(p90_hours)            AS p90_hours,
+        MEDIAN(equity_score)         AS equity_score,
+        MEDIAN(city_p90)             AS city_p90,
         SUM(request_count)           AS complaint_count,
         MAX(median_household_income) AS median_household_income,
         MAX(income_quintile)         AS income_quintile
     FROM MARTS.FCT_EQUITY_SPLITS
     WHERE complaint_type = '{selected_complaint}'
       AND borough IN ('{borough_filter}')
+      AND request_count >= 10
       {date_filter}
     GROUP BY tract_geoid, complaint_type
     """
@@ -162,16 +163,17 @@ else:
     sql = f"""
     SELECT
         tract_geoid,
-        AVG(p50_hours)               AS p50_hours,
-        AVG(p90_hours)               AS p90_hours,
-        AVG(equity_score)            AS equity_score,
-        AVG(city_p90)                AS city_p90,
+        MEDIAN(p50_hours)            AS p50_hours,
+        MEDIAN(p90_hours)            AS p90_hours,
+        MEDIAN(equity_score)         AS equity_score,
+        MEDIAN(city_p90)             AS city_p90,
         SUM(request_count)           AS complaint_count,
         MAX(median_household_income) AS median_household_income,
         MAX(income_quintile)         AS income_quintile
     FROM MARTS.FCT_EQUITY_SPLITS
     WHERE income_quintile IN ({quintile_filter})
       AND borough IN ('{borough_filter}')
+      AND request_count >= 10
       {date_filter}
     GROUP BY tract_geoid
     """

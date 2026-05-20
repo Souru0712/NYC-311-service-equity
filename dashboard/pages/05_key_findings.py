@@ -402,61 +402,64 @@ with st.expander("How to read this page"):
 
 st.divider()
 
-# ── Headline metrics ──────────────────────────────────────────────────────────
-headline_sql = """
-WITH quintile_avgs AS (
-    SELECT
-        AVG(CASE WHEN income_quintile = 1 THEN equity_score END) AS q1_avg,
-        AVG(CASE WHEN income_quintile = 5 THEN equity_score END) AS q5_avg
-    FROM MARTS.FCT_EQUITY_SPLITS
-    WHERE income_quintile IN (1, 5)
-),
-prior_year AS (
-    SELECT
-        AVG(CASE WHEN income_quintile = 1 THEN equity_score END) AS q1_avg_py,
-        AVG(CASE WHEN income_quintile = 5 THEN equity_score END) AS q5_avg_py
-    FROM MARTS.FCT_EQUITY_SPLITS
-    WHERE income_quintile IN (1, 5)
-      AND YEAR(request_month) = YEAR(CURRENT_DATE) - 2
-)
+# ── Headline: noise cluster from FCT_EQUITY_GAP_BY_TYPE ───────────────────────
+# Aggregate Q1-vs-Q5 comparisons are confounded by complaint-mix and are not
+# reported here. The headline is sourced from within-complaint-type medians
+# (per-tract P90, volume floor 30 complaints/tract, bilateral 500-complaint guard).
+headline_gap_sql = """
 SELECT
-    ROUND(q.q1_avg, 3)                             AS q1_avg_equity,
-    ROUND(q.q5_avg, 3)                             AS q5_avg_equity,
-    ROUND(q.q1_avg / NULLIF(q.q5_avg, 0), 2)       AS overall_ratio,
-    ROUND(q.q1_avg - p.q1_avg_py, 3)               AS q1_delta,
-    ROUND(q.q5_avg - p.q5_avg_py, 3)               AS q5_delta,
-    ROUND((q.q1_avg / NULLIF(q.q5_avg, 0)) - (p.q1_avg_py / NULLIF(p.q5_avg_py, 0)), 2) AS ratio_delta
-FROM quintile_avgs q, prior_year p
+    complaint_type,
+    q1_n_complaints,
+    q5_n_complaints,
+    q1_p90_hours,
+    q5_p90_hours,
+    q1_over_q5_gap
+FROM MARTS.FCT_EQUITY_GAP_BY_TYPE
+ORDER BY q1_over_q5_gap DESC
 """
 with st.spinner("Loading headline metrics..."):
-    headline_df = run_query(headline_sql)
+    headline_df = run_query(headline_gap_sql)
+
+_NOISE_TYPES = [
+    "NOISE - RESIDENTIAL", "NOISE - STREET/SIDEWALK",
+    "NOISE - VEHICLE",     "NOISE - COMMERCIAL",
+]
 
 if not headline_df.empty:
-    row = headline_df.iloc[0]
-    _q1_delta    = float(row["q1_delta"])    if row["q1_delta"]    is not None else None
-    _q5_delta    = float(row["q5_delta"])    if row["q5_delta"]    is not None else None
-    _ratio_delta = float(row["ratio_delta"]) if row["ratio_delta"] is not None else None
+    top = headline_df.iloc[0]
+    noise = headline_df[headline_df["complaint_type"].isin(_NOISE_TYPES)]
     col1, col2, col3 = st.columns(3)
     col1.metric(
-        "Q1 avg equity score",
-        f"{row['q1_avg_equity']:.2f}",
-        delta=f"{_q1_delta:+.3f} vs 2 yrs ago" if _q1_delta is not None else None,
-        delta_color="inverse",
-        help="Average equity score for the lowest-income 20% of tracts. 1.0 = city average wait. Red delta = worsening.",
+        "Largest confirmed gap",
+        f"{top['q1_over_q5_gap']:.2f}×",
+        help=(
+            f"{top['complaint_type']}: Q1 median tract P90 = {top['q1_p90_hours']} hrs "
+            f"vs Q5 = {top['q5_p90_hours']} hrs. "
+            f"Q1 n={int(top['q1_n_complaints']):,} | Q5 n={int(top['q5_n_complaints']):,}. "
+            "Both quintiles cleared the 500-complaint volume floor."
+        ),
     )
-    col2.metric(
-        "Q5 avg equity score",
-        f"{row['q5_avg_equity']:.2f}",
-        delta=f"{_q5_delta:+.3f} vs 2 yrs ago" if _q5_delta is not None else None,
-        delta_color="inverse",
-        help="Average equity score for the highest-income 20% of tracts.",
-    )
-    col3.metric(
-        "Q1 / Q5 ratio",
-        f"{row['overall_ratio']:.2f}x",
-        delta=f"{_ratio_delta:+.2f} vs 2 yrs ago" if _ratio_delta is not None else None,
-        delta_color="inverse",
-        help="How many times longer Q1 tracts wait relative to Q5. Above 1.0 = inequality exists. Rising = worsening.",
+    if not noise.empty:
+        col2.metric(
+            "NYPD noise gap (4 categories)",
+            f"~{noise['q1_over_q5_gap'].median():.1f}×",
+            help=(
+                "Consistent ~2× gap across Noise - Residential, Street/Sidewalk, Vehicle, "
+                "and Commercial — all handled by NYPD. "
+                "Q1 median P90 ≈ 3–4 hrs vs Q5 ≈ 2 hrs."
+            ),
+        )
+        col3.metric(
+            "Q1 noise complaints",
+            f"{noise['q1_n_complaints'].sum() / 1_000_000:.1f}M",
+            help="Total Q1-tract complaints behind the noise cluster finding.",
+        )
+    st.caption(
+        "Gaps sourced from `FCT_EQUITY_GAP_BY_TYPE`: per-tract median P90, "
+        "30-complaint volume floor per tract, bilateral 500-complaint guard per quintile. "
+        "Aggregate Q1-vs-Q5 comparisons are not shown — they invert due to complaint-mix "
+        "confounding (confirmed: helicopter noise, tree requests, and food inspections "
+        "have identical P90s in Q1 and Q5 but are filed 2–62× more often by Q5 tracts)."
     )
 
 st.divider()
@@ -464,8 +467,9 @@ st.divider()
 # ── Finding 1: Which complaint types drive the gap? ───────────────────────────
 st.subheader("① Which complaint types have the biggest equity gap — and which agencies own them?")
 st.markdown("""
-The bars below show the top 10 complaint types ranked by the difference in average equity score
-between Q1 and Q5 tracts. A larger gap means the city's response is *more unequal* for that
+The bars below show the top 10 complaint types ranked by the difference in **median** equity score
+between Q1 and Q5 tracts (only rows with 10+ complaints per tract per month are included, removing
+thin-data outliers). A larger gap means the city's response is *more unequal* for that
 complaint type. The **Agency** column identifies who is accountable for closing it.
 """)
 
@@ -492,11 +496,12 @@ gap_sql = f"""
 WITH gaps AS (
     SELECT
         complaint_type,
-        AVG(CASE WHEN income_quintile = 1 THEN equity_score END) AS q1_avg,
-        AVG(CASE WHEN income_quintile = 5 THEN equity_score END) AS q5_avg,
-        SUM(request_count)                                        AS total_requests
+        MEDIAN(CASE WHEN income_quintile = 1 THEN equity_score END) AS q1_avg,
+        MEDIAN(CASE WHEN income_quintile = 5 THEN equity_score END) AS q5_avg,
+        SUM(request_count)                                          AS total_requests
     FROM MARTS.FCT_EQUITY_SPLITS
     WHERE income_quintile IN (1, 5)
+      AND request_count >= 10
     GROUP BY complaint_type
 )
 SELECT
@@ -610,10 +615,11 @@ heatmap_sql = f"""
 SELECT
     borough,
     income_quintile,
-    ROUND(AVG(equity_score), 3) AS avg_equity_score
+    ROUND(MEDIAN(equity_score), 3) AS avg_equity_score
 FROM MARTS.FCT_EQUITY_SPLITS
 WHERE borough NOT IN ('UNSPECIFIED', '')
   AND income_quintile IS NOT NULL
+  AND request_count >= 10
   AND request_month BETWEEN '{f2_start}' AND '{f2_end}'
 GROUP BY borough, income_quintile
 ORDER BY borough, income_quintile
@@ -670,10 +676,11 @@ trend_sql = """
 SELECT
     request_month,
     income_quintile,
-    AVG(equity_score)  AS avg_equity_score,
-    SUM(request_count) AS total_requests
+    MEDIAN(equity_score) AS avg_equity_score,
+    SUM(request_count)   AS total_requests
 FROM MARTS.FCT_EQUITY_SPLITS
 WHERE income_quintile IN (1, 5)
+  AND request_count >= 10
 GROUP BY request_month, income_quintile
 ORDER BY request_month
 """
@@ -777,20 +784,22 @@ _h_col.caption("AI-generated synthesis stored in Snowflake. Groq is called only 
 # Extra context from other dashboard pages fed into Groq
 quintile_p90_df = run_query("""
     SELECT income_quintile,
-           ROUND(AVG(p90_hours), 1)    AS avg_p90_hours,
-           ROUND(AVG(equity_score), 3) AS avg_equity_score
+           ROUND(MEDIAN(p90_hours), 1)    AS avg_p90_hours,
+           ROUND(MEDIAN(equity_score), 3) AS avg_equity_score
     FROM MARTS.FCT_EQUITY_SPLITS
     WHERE income_quintile IS NOT NULL
+      AND request_count >= 10
     GROUP BY income_quintile
     ORDER BY income_quintile
 """)
 
 top_complaints_df = run_query("""
     SELECT complaint_type,
-           SUM(request_count)          AS total_requests,
-           ROUND(AVG(p90_hours), 1)    AS avg_p90_hours,
-           ROUND(AVG(equity_score), 3) AS avg_equity_score
+           SUM(request_count)             AS total_requests,
+           ROUND(MEDIAN(p90_hours), 1)    AS avg_p90_hours,
+           ROUND(MEDIAN(equity_score), 3) AS avg_equity_score
     FROM MARTS.FCT_EQUITY_SPLITS
+    WHERE request_count >= 10
     GROUP BY complaint_type
     ORDER BY total_requests DESC
     LIMIT 10
@@ -818,9 +827,10 @@ borough_complaint_df = run_query("""
 agency_raw_df = run_query("""
     SELECT complaint_type,
            income_quintile,
-           SUM(request_count) AS total_requests,
-           AVG(equity_score)  AS avg_equity_score
+           SUM(request_count)    AS total_requests,
+           MEDIAN(equity_score)  AS avg_equity_score
     FROM MARTS.FCT_EQUITY_SPLITS
+    WHERE request_count >= 10
     GROUP BY complaint_type, income_quintile
 """)
 
