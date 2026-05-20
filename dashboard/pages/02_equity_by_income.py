@@ -1,3 +1,6 @@
+import re
+from datetime import date
+
 import streamlit as st
 
 from utils.snowflake_conn import run_query
@@ -55,6 +58,24 @@ COMPLAINT_QUERY = "SELECT DISTINCT complaint_type FROM MARTS.FCT_EQUITY_SPLITS O
 complaint_types = run_query(COMPLAINT_QUERY)["complaint_type"].tolist()
 selected_complaint = st.selectbox("Complaint type", complaint_types, index=0)
 
+# ── Date range filter ─────────────────────────────────────────────────────────
+_DEFAULT_START = "2020-01-01"
+_DEFAULT_END   = date.today().strftime("%Y-%m-%d")
+_DATE_RE       = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+st.caption("📅 Date range · Format: YYYY-MM-DD · e.g. 2023-01-01")
+_dc1, _dc2, _dc3 = st.columns([2, 2, 1])
+_start_input = _dc1.text_input("Start date", value=_DEFAULT_START, key="ei_start")
+_end_input   = _dc2.text_input("End date",   value=_DEFAULT_END,   key="ei_end")
+if _dc3.button("↺ Reset", key="ei_reset", use_container_width=True):
+    st.session_state.pop("ei_start", None)
+    st.session_state.pop("ei_end",   None)
+    st.rerun()
+
+start_date  = _start_input if _DATE_RE.match(_start_input or "") else _DEFAULT_START
+end_date    = _end_input   if _DATE_RE.match(_end_input   or "") else _DEFAULT_END
+date_filter = f"AND request_month BETWEEN '{start_date}' AND '{end_date}'"
+
 quintile_sql = f"""
 SELECT
     income_quintile,
@@ -63,6 +84,7 @@ SELECT
     SUM(request_count)          AS total_complaints
 FROM MARTS.FCT_EQUITY_SPLITS
 WHERE complaint_type = '{selected_complaint}'
+  {date_filter}
 GROUP BY income_quintile
 ORDER BY income_quintile
 """
@@ -109,6 +131,7 @@ SELECT
 FROM MARTS.FCT_EQUITY_SPLITS
 WHERE complaint_type = '{selected_complaint}'
   AND p90_hours IS NOT NULL
+  {date_filter}
 GROUP BY tract_geoid, complaint_type, borough
 """
 scatter_df = run_query(scatter_sql)

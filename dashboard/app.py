@@ -1750,7 +1750,8 @@ st.subheader("Key Metrics Explained")
 
 st.markdown("""
 All response times are in **hours**. Percentiles are computed per tract — not city-wide —
-so each metric reflects that specific neighborhood's own complaint history.
+so each metric reflects that specific neighborhood's own complaint history — an accumulation
+of every 311 request filed from **January 2020 through the present day**.
 
 | Metric | SQL | Meaning |
 |---|---|---|

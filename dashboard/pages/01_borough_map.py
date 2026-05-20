@@ -1,3 +1,6 @@
+import re
+from datetime import date
+
 import plotly.express as px
 import streamlit as st
 
@@ -93,6 +96,24 @@ else:
 
 selected_boroughs = col2.multiselect("Borough", BOROUGHS, default=BOROUGHS)
 
+# ── Date range filter ─────────────────────────────────────────────────────────
+_DEFAULT_START = "2020-01-01"
+_DEFAULT_END   = date.today().strftime("%Y-%m-%d")
+_DATE_RE       = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+st.caption("📅 Date range · Format: YYYY-MM-DD · e.g. 2023-01-01")
+_dc1, _dc2, _dc3 = st.columns([2, 2, 1])
+_start_input = _dc1.text_input("Start date", value=_DEFAULT_START, key="bm_start")
+_end_input   = _dc2.text_input("End date",   value=_DEFAULT_END,   key="bm_end")
+if _dc3.button("↺ Reset", key="bm_reset", use_container_width=True):
+    st.session_state.pop("bm_start", None)
+    st.session_state.pop("bm_end",   None)
+    st.rerun()
+
+start_date  = _start_input if _DATE_RE.match(_start_input or "") else _DEFAULT_START
+end_date    = _end_input   if _DATE_RE.match(_end_input   or "") else _DEFAULT_END
+date_filter = f"AND request_month BETWEEN '{start_date}' AND '{end_date}'"
+
 # ── Validation ────────────────────────────────────────────────────────────────
 if not selected_boroughs:
     st.warning("Select at least one borough.")
@@ -121,6 +142,7 @@ if filter_mode == "Complaint type":
     FROM MARTS.FCT_EQUITY_SPLITS
     WHERE complaint_type = '{selected_complaint}'
       AND borough IN ('{borough_filter}')
+      {date_filter}
     GROUP BY tract_geoid, complaint_type
     """
     map_title = f"Equity Score — {selected_complaint}"
@@ -138,6 +160,7 @@ else:
     FROM MARTS.FCT_EQUITY_SPLITS
     WHERE income_quintile IN ({quintile_filter})
       AND borough IN ('{borough_filter}')
+      {date_filter}
     GROUP BY tract_geoid
     """
     map_title = f"Equity Score — Income Quintile {', '.join(selected_quintile_labels)}"

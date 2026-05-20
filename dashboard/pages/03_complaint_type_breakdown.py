@@ -1,3 +1,6 @@
+import re
+from datetime import date
+
 import plotly.express as px
 import streamlit as st
 
@@ -42,7 +45,24 @@ with st.expander("How to read this page"):
     then switch to `p90_hours` to see which ones are the slowest to resolve.
     """)
 
-sql = """
+# ── Date range filter ─────────────────────────────────────────────────────────
+_DEFAULT_START = "2020-01-01"
+_DEFAULT_END   = date.today().strftime("%Y-%m-%d")
+_DATE_RE       = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+st.caption("📅 Date range · Format: YYYY-MM-DD · e.g. 2023-01-01")
+_dc1, _dc2, _dc3 = st.columns([2, 2, 1])
+_start_input = _dc1.text_input("Start date", value=_DEFAULT_START, key="cb_start")
+_end_input   = _dc2.text_input("End date",   value=_DEFAULT_END,   key="cb_end")
+if _dc3.button("↺ Reset", key="cb_reset", use_container_width=True):
+    st.session_state.pop("cb_start", None)
+    st.session_state.pop("cb_end",   None)
+    st.rerun()
+
+start_date  = _start_input if _DATE_RE.match(_start_input or "") else _DEFAULT_START
+end_date    = _end_input   if _DATE_RE.match(_end_input   or "") else _DEFAULT_END
+
+sql = f"""
 SELECT
     borough,
     complaint_type,
@@ -51,6 +71,7 @@ SELECT
     SUM(request_count)      AS complaint_count,
     AVG(equity_score)       AS avg_equity_score
 FROM MARTS.FCT_EQUITY_SPLITS
+WHERE request_month BETWEEN '{start_date}' AND '{end_date}'
 GROUP BY borough, complaint_type
 """
 df = run_query(sql)
