@@ -12,13 +12,16 @@ _PAGE_DESCRIPTIONS = {
 
 def setup_sidebar() -> None:
     """Render last-refresh timestamp and page guide in the sidebar."""
-    from utils.snowflake_conn import get_last_refresh
-
     with st.sidebar:
         st.divider()
-        last = get_last_refresh()
-        st.caption(f"🕐 **Data last refreshed:** {last} UTC")
+        try:
+            from utils.snowflake_conn import get_last_refresh
+            last = get_last_refresh()
+            st.caption(f"🕐 **Data last refreshed:** {last} UTC")
+        except Exception:
+            st.caption("🕐 **Data last refreshed:** —")
         st.divider()
         st.caption("**Pages**")
         for page, desc in _PAGE_DESCRIPTIONS.items():
             st.caption(f"**{page}** — {desc}")
+        st.divider()

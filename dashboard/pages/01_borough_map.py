@@ -50,6 +50,11 @@ def _load_nta_lookup() -> dict[str, str]:
 
 
 st.header("Tract Choropleth — P90 Response Time & Equity Score")
+st.markdown(
+    "Color-coded map of every NYC census tract. Green tracts receive on-par or better service. "
+    "Red tracts wait significantly longer than the city median. "
+    "Filter by complaint type or income quintile — zoom in by selecting a single borough."
+)
 
 with st.expander("How to read this map"):
     st.markdown("""

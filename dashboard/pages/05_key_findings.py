@@ -759,9 +759,10 @@ st.divider()
 # ── AI synthesis ──────────────────────────────────────────────────────────────
 import streamlit.components.v1 as _components
 
-_h_col, _dl_col, _cp_col = st.columns([5, 1.2, 1.2])
+_h_col, _btn_col = st.columns([5, 2.6])
 _h_col.subheader("④ What the data tells us — and what should happen next")
 _h_col.caption("AI-generated synthesis stored in Snowflake. Groq is called only once per data refresh.")
+# _btn_col is filled below once synthesis is confirmed cached and complete
 
 # Extra context from other dashboard pages fed into Groq
 quintile_p90_df = run_query("""
@@ -908,33 +909,50 @@ if not gap_df.empty and not heatmap_df.empty and not trend_df.empty and not head
             unsafe_allow_html=True,
         )
 
-        # ── Buttons next to the ④ heading ────────────────────────────────────
+        # ── Buttons next to the ④ heading — both rendered in one HTML component ──
+        import base64 as _b64
+        import html as _html
+
         report_date = date.today().strftime("%Y_%m_%d")
         report_name = f"nyc_311_service_equity_report_{report_date}.pdf"
+        _pdf_b64    = ""
         try:
-            pdf_bytes = _generate_pdf(f1_sort, synthesis_text)
-            _dl_col.download_button(
-                label="⬇️ Download",
-                data=pdf_bytes,
-                file_name=report_name,
-                mime="application/pdf",
-                use_container_width=True,
-            )
+            _pdf_bytes  = _generate_pdf(f1_sort, synthesis_text)
+            _pdf_b64    = _b64.b64encode(_pdf_bytes).decode()
         except Exception as _pdf_err:
-            _dl_col.warning(f"PDF error: {_pdf_err}")
+            _btn_col.warning(f"PDF error: {_pdf_err}")
 
-        import html as _html
         _escaped = _html.escape(synthesis_text, quote=True)
-        with _cp_col:
+        _btn_style = (
+            "display:inline-flex;align-items:center;justify-content:center;"
+            "width:calc(50% - 8px);height:36px;background:#262730;color:white;"
+            "border:1px solid #555;border-radius:6px;cursor:pointer;"
+            "font-size:13px;font-family:sans-serif;text-decoration:none;"
+            "box-sizing:border-box;"
+        )
+
+        with _btn_col:
             _components.html(f"""
-                <textarea id="synth" style="position:absolute;opacity:0;pointer-events:none;height:1px;width:1px">{_escaped}</textarea>
-                <button onclick="var t=document.getElementById('synth');t.removeAttribute('style');t.select();document.execCommand('copy');t.setAttribute('style','position:absolute;opacity:0;pointer-events:none;height:1px;width:1px');this.innerText='✓ Copied'"
-                style="width:100%;height:38px;background:#262730;color:white;
-                       border:1px solid #555;border-radius:6px;cursor:pointer;
-                       font-size:13px;font-family:sans-serif;">
-                    📋 Copy
-                </button>
-            """, height=50)
+                <div style="display:flex;gap:16px;align-items:center;padding-top:4px;">
+                    <a href="data:application/pdf;base64,{_pdf_b64}"
+                       download="{report_name}"
+                       style="{_btn_style}">
+                        &#11015;&#65039; Download
+                    </a>
+                    <textarea id="synth-txt"
+                        style="position:absolute;opacity:0;pointer-events:none;height:1px;width:1px"
+                        >{_escaped}</textarea>
+                    <button style="{_btn_style}"
+                        onclick="var t=document.getElementById('synth-txt');
+                                 t.removeAttribute('style');
+                                 t.select();
+                                 document.execCommand('copy');
+                                 t.setAttribute('style','position:absolute;opacity:0;pointer-events:none;height:1px;width:1px');
+                                 this.innerText='✓ Copied'">
+                        &#128203; Copy
+                    </button>
+                </div>
+            """, height=48)
 
     elif cached and cached[0] == "pending":
         # Another user already clicked — don't call Groq again

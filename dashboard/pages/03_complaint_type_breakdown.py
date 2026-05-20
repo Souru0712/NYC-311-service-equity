@@ -21,6 +21,11 @@ _chart_config = {"displayModeBar": True, "displaylogo": False,
                  "modeBarButtonsToRemove": ["select2d", "lasso2d"]}
 
 st.header("Complaint Type Breakdown by Borough")
+st.markdown(
+    "Heatmap of all 311 complaint types across the five boroughs. "
+    "Toggle between P90 (worst-case response time), P50 (typical response time), and complaint volume. "
+    "Identifies which agencies are slowest in which boroughs and which complaint types drive the most demand."
+)
 
 with st.expander("How to read this page"):
     st.markdown("""

@@ -20,6 +20,11 @@ _chart_config = {"displayModeBar": True, "displaylogo": False,
                  "modeBarButtonsToRemove": ["select2d", "lasso2d"]}
 
 st.header("Equity Score by Income Quintile")
+st.markdown(
+    "Shows whether lower-income neighborhoods wait longer for the same 311 complaint type. "
+    "Select a complaint type to see the equity gap between Q1 (lowest income) and Q5 (highest income) tracts, "
+    "with a scatter plot of individual census tracts colored by borough."
+)
 
 with st.expander("How to read this page"):
     st.markdown("""
