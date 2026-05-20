@@ -1689,6 +1689,40 @@ The question this dashboard asks is simple: **does the city respond equally fast
 Research and resident experience suggest the answer is no. Neighborhoods with lower household
 incomes tend to wait longer for the same types of complaints to be resolved compared to wealthier
 neighborhoods — even when the complaints are identical. This is a **service equity** problem.
+
+But the data opens harder questions that go beyond response time:
+
+**Which agencies experience the most demand?**
+Some agencies — NYPD, HPD, Sanitation — absorb a disproportionate share of NYC's 21 million
+311 requests. When demand consistently outpaces capacity, slower response times in high-volume
+neighborhoods are not the result of neglect — they are the result of structural underfunding.
+The agencies that serve the most complaints are often the least resourced to handle them.
+
+**Which agencies need policy changes?**
+Response time gaps that are uniform across boroughs suggest an agency-level protocol problem —
+the agency's standard operating procedure is simply not fast enough, regardless of where the
+complaint comes from. These are policy failures, not resource failures, and require different
+interventions: revised service-level agreements, mandatory escalation timelines, and accountability
+reporting tied to neighborhood income.
+
+**Which agencies need more staff?**
+When a specific borough or income quintile shows dramatically slower response times for a
+particular complaint type — but other boroughs don't — the problem is likely workforce allocation.
+The agency has the capacity to respond quickly somewhere, just not here. That is a staffing and
+deployment problem that can be addressed without new legislation.
+
+**How do we build a just system in a city shaped by inequality?**
+Service equity does not exist in isolation. NYC's neighborhoods were shaped by decades of
+redlining, disinvestment, and unequal infrastructure spending. A low-income census tract in the
+South Bronx does not start from the same baseline as a high-income tract on the Upper East Side —
+its streets, buildings, and pipes are older, more overcrowded, and more likely to generate urgent
+complaints. Closing the response-time gap requires more than equal treatment. It requires
+**targeted, proportional investment** in the neighborhoods that have historically received the
+least — because equal treatment of unequal conditions is not equity, it is the preservation of
+the status quo.
+
+This dashboard does not answer all of these questions. What it does is surface the data clearly
+enough that residents, advocates, and policymakers can no longer claim they did not know.
 """)
 
 

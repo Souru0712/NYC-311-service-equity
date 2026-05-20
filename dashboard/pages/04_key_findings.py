@@ -515,10 +515,13 @@ if not trend_df.empty:
     )
 
     # Volume table — matches the current grouping (monthly or seasonal)
+    q1_vol = q1["total_requests"].fillna(0).astype(int).values
+    q5_vol = q5["total_requests"].fillna(0).astype(int).values
     volume_table = pd.DataFrame({
         "Period":       [str(p)[:10] if not seasonal_trend else p for p in period_order],
-        "Q1 Requests":  q1["total_requests"].fillna(0).astype(int).values,
-        "Q5 Requests":  q5["total_requests"].fillna(0).astype(int).values,
+        "Q1 Requests":  q1_vol,
+        "Q5 Requests":  q5_vol,
+        "Q1 − Q5":      q1_vol - q5_vol,
     }).set_index("Period")
     st.markdown(f"**Q1 vs Q5 request volume by {'season' if seasonal_trend else 'month'}:**")
     st.dataframe(volume_table, use_container_width=True)
