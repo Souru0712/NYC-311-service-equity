@@ -1,3 +1,6 @@
+import re
+from datetime import date
+
 from groq import Groq
 import plotly.express as px
 import plotly.graph_objects as go
