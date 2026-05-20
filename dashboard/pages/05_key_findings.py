@@ -188,55 +188,55 @@ def _generate_pdf(sort_context: str, body: str) -> bytes:
 
     def _s(text: str) -> str:
         # Sanitize to latin-1 — replaces any character Helvetica cannot encode.
-        return text.encode(“latin-1”, errors=”replace”).decode(“latin-1”)
+        return text.encode("latin-1", errors="replace").decode("latin-1")
 
     pdf = FPDF()
     pdf.set_margins(20, 20, 20)
     pdf.add_page()
 
     # Header block
-    pdf.set_font(“Helvetica”, “B”, 18)
-    pdf.multi_cell(0, 10, _s(“NYC 311 Service Equity Report”))
-    pdf.set_font(“Helvetica”, “”, 10)
-    pdf.cell(0, 6, _s(f”Generated: {date.today().strftime(‘%B %d, %Y’)}”))
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.multi_cell(0, 10, _s("NYC 311 Service Equity Report"))
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, _s(f"Generated: {date.today().strftime('%B %d, %Y')}"))
     pdf.ln(5)
-    pdf.cell(0, 6, _s(f”Sort context: {sort_context}”))
+    pdf.cell(0, 6, _s(f"Sort context: {sort_context}"))
     pdf.ln(8)
     pdf.set_draw_color(180, 180, 180)
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
     pdf.ln(6)
 
-    for raw_line in body.split(“\n”):
+    for raw_line in body.split("\n"):
         line = raw_line.strip()
 
-        if not line or line == “---”:
+        if not line or line == "---":
             pdf.ln(4)
             continue
 
         # **Section Header** — bold heading
-        if line.startswith(“**”) and line.endswith(“**”) and line.count(“**”) == 2:
-            heading = line.strip(“*”).strip()
-            pdf.set_font(“Helvetica”, “B”, 12)
+        if line.startswith("**") and line.endswith("**") and line.count("**") == 2:
+            heading = line.strip("*").strip()
+            pdf.set_font("Helvetica", "B", 12)
             pdf.ln(3)
             pdf.multi_cell(0, 7, _s(heading))
             pdf.ln(1)
             continue
 
         # Numbered list item
-        if len(line) > 2 and line[0].isdigit() and line[1] in “.)”:
-            pdf.set_font(“Helvetica”, “”, 10)
+        if len(line) > 2 and line[0].isdigit() and line[1] in ".)":
+            pdf.set_font("Helvetica", "", 10)
             pdf.multi_cell(0, 6, _s(line))
             continue
 
         # Bullet list
-        if line.startswith(“- “) or line.startswith(“* “):
-            pdf.set_font(“Helvetica”, “”, 10)
-            pdf.multi_cell(0, 6, _s(“- “ + line[2:]))
+        if line.startswith("- ") or line.startswith("* "):
+            pdf.set_font("Helvetica", "", 10)
+            pdf.multi_cell(0, 6, _s("- " + line[2:]))
             continue
 
         # Strip inline bold markers for body text
-        line = line.replace(“**”, “”)
-        pdf.set_font(“Helvetica”, “”, 10)
+        line = line.replace("**", "")
+        pdf.set_font("Helvetica", "", 10)
         pdf.multi_cell(0, 6, _s(line))
 
     return bytes(pdf.output())
