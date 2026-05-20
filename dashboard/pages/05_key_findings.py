@@ -9,6 +9,7 @@ from groq import Groq
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as _components
 
 from utils.snowflake_conn import run_query
 from utils.styles import inject_css
@@ -778,8 +779,6 @@ small-sample noise.
 st.divider()
 
 # ── ⑤ AI chart narration -- description only, findings locked ──────────────────
-import streamlit.components.v1 as _components
-
 _h_col, _btn_col = st.columns([5, 2.6])
 _h_col.subheader("⑤ AI Chart Narration")
 _h_col.caption("Plain-language description of the charts above. Findings are locked -- the AI restates, does not interpret.")
