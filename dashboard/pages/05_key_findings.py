@@ -834,7 +834,7 @@ agency_raw_df = run_query("""
     GROUP BY complaint_type, income_quintile
 """)
 
-if not gap_df.empty and not heatmap_df.empty and not trend_df.empty and not headline_df.empty:
+if not gap_df.empty and not heatmap_df.empty and not trend_df.empty:
 
     # Ensure the cache table exists (runs once per server lifetime via @st.cache_resource)
     _ensure_cache_table()
@@ -906,15 +906,17 @@ if not gap_df.empty and not heatmap_df.empty and not trend_df.empty and not head
     else:
         agency_json = "  no data"
 
-    row     = headline_df.iloc[0]
-    q1_avg  = float(row["q1_avg_equity"])
-    q5_avg  = float(row["q5_avg_equity"])
-    ratio   = float(row["overall_ratio"])
+    # Headline: top confirmed gaps from FCT_EQUITY_GAP_BY_TYPE
+    top_gaps_json = "\n".join(
+        f"  {r['complaint_type']}: Q1 P90={r['q1_p90_hours']} hrs, Q5 P90={r['q5_p90_hours']} hrs, "
+        f"gap={r['q1_over_q5_gap']}x "
+        f"(Q1 n={int(r['q1_n_complaints']):,}, Q5 n={int(r['q5_n_complaints']):,})"
+        for _, r in headline_df.head(10).iterrows()
+    ) if not headline_df.empty else "  no data"
 
-    # ── Fix 3: hash includes sort choice so each sort gets its own synthesis ──
     data_hash = _data_hash(
         gap_json, heatmap_json,
-        trend_json + quintile_p90_json + top_complaints_json + borough_complaint_json + agency_json + f1_sort,
+        trend_json + top_gaps_json + top_complaints_json + borough_complaint_json + agency_json + f1_sort,
     )
 
     # Always check Snowflake first — zero API calls
@@ -1011,52 +1013,50 @@ if not gap_df.empty and not heatmap_df.empty and not trend_df.empty and not head
     else:
         # No cached row — only dev can trigger generation
         prompt = f"""\
-DASHBOARD CONTEXT
-The user is viewing Finding 1 sorted by: {f1_sort}.
-Frame your analysis accordingly — \
-{'prioritise the largest equity gaps and which agencies own them' if f1_sort == 'Gap desc' else 'prioritise high-volume agencies where systemic underservice affects the most residents'}.
+METHODOLOGY NOTE — read before analysing any number:
+Aggregate Q1-vs-Q5 comparisons (averaging equity scores across all complaint types) are \
+confounded by complaint-mix and are NOT provided. Reason: Q5 tracts file structurally \
+slow complaint types (helicopter noise, tree requests) at much higher rates than Q1 — \
+confirmed via tail decomposition showing identical P90s in both quintiles for those types \
+(helicopter: Q1 P90 ~26,644 hrs, Q5 P90 ~26,317 hrs) but Q5 filing them 62× more often. \
+The aggregate gap inverts and is meaningless. Equity is only answerable WITHIN complaint type. \
+All gap figures below are within-complaint-type comparisons.
 
-CITYWIDE HEADLINE METRICS
-  Q1 avg equity score: {q1_avg:.2f}
-  Q5 avg equity score: {q5_avg:.2f}
-  Q1/Q5 ratio: {ratio:.2f}× (Q1 tracts wait {ratio:.2f}x longer than Q5 tracts on average)
+CONFIRMED EQUITY GAPS — within-complaint-type, median tract P90, volume floor ≥30/tract, \
+bilateral ≥500 complaint guard. q1_over_q5_gap > 1.0 means low-income tracts wait longer. \
+These are the only defensible headline numbers. Do not compute or infer any other gap.
+{top_gaps_json}
 
-TOP 10 COMPLAINT TYPES — sorted by {f1_sort}
-Equity score = tract P90 ÷ median tract P90 citywide (1.0 = city average). \
-Complaint types marked [LOW VOLUME] have fewer than 500 requests — their gaps are \
-statistically unreliable and should not be cited as systemic evidence.
+FINDING 1 — Top complaint types by Q1-vs-Q5 gap (same methodology, sorted by {f1_sort}):
 {gap_json}
 
-BOROUGH × INCOME QUINTILE HEATMAP (avg equity score, 1.0 = city average)
-Use this to distinguish geographic disparity (whole borough elevated) from \
-income disparity (gradient within a borough from Q1 to Q5).
+FINDING 2 — Borough × income quintile median equity score heatmap (1.0 = city median wait):
+Use this to distinguish geographic disparity (entire borough elevated) from income disparity \
+(gradient within a borough from Q1 to Q5). Note: these equity scores are per-complaint-type \
+medians and are more reliable than a cross-type aggregate.
 {heatmap_json}
 
-FULL MONTHLY EQUITY TREND — Q1 vs Q5 (January 2020 to present)
-Examine this series carefully. Identify specific months/periods of elevated or \
-narrowing gaps and reason about their causes (COVID disruption, seasonal demand, \
-staffing changes, policy interventions). Do not treat this as a single summary — \
-analyse the shape of the curve.
+FINDING 3 — Monthly P90 response time by quintile (raw hours, pooled complaints per month):
+This is a volume-weighted trend across all complaint types. It shows whether service speed \
+has improved or worsened over time by income group. It is NOT an equity-gap series — it \
+inherits the complaint-mix confound. Label it as a response-time trend, not an equity gap. \
+Look for COVID-era disruption (2020-2021), seasonal patterns, and long-run direction.
 {trend_json}
 
-INCOME QUINTILE — AVG P90 HOURS AND EQUITY SCORE (all complaint types combined)
-{quintile_p90_json}
-
-TOP 10 COMPLAINT TYPES BY TOTAL VOLUME (cross-reference with equity gap data above)
-High-volume + high-gap = systemic and urgent. High-volume + low-gap = agency performing well under pressure.
+TOP 10 COMPLAINT TYPES BY TOTAL VOLUME:
+High-volume + high-gap (from confirmed gaps above) = most urgent. \
+High-volume + low or negative gap = agency performing equitably under pressure.
 {top_complaints_json}
 
-SLOWEST COMPLAINT TYPES PER BOROUGH — top 3 by avg P90 (500+ requests only)
-Use this to explain why specific boroughs show elevated equity scores regardless of income.
+SLOWEST COMPLAINT TYPES PER BOROUGH — top 3 by median P90 (500+ requests only):
 {borough_complaint_json}
 
-AGENCY BREAKDOWN — total requests, Q1 avg equity, Q5 avg equity, gap (sorted by gap desc)
-Gap = Q1 avg equity − Q5 avg equity. High gap = agency treats income groups unequally. \
-High volume + high gap = most urgent intervention needed.
+AGENCY BREAKDOWN — total requests, Q1 median equity, Q5 median equity, gap:
 {agency_json}
 
 Produce your full analysis following the framework in your instructions. \
-Be specific, be causal, be actionable.\
+Ground every claim in the confirmed gap numbers above. \
+Do not cite aggregate Q1-vs-Q5 equity scores — they are confounded and not provided.\
 """
         if _dev:
             st.info("No AI synthesis cached for this data + sort combination.")
