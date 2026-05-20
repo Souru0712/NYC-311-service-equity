@@ -435,32 +435,23 @@ f1_sort = st.radio(
     key="f1_sort",
 )
 f1_order = {
-    "Gap desc":            "equity_gap DESC",
-    "Total requests desc": "total_requests DESC",
+    "Gap desc":            "q1_over_q5_gap DESC",
+    "Total requests desc": "(q1_n_complaints + q5_n_complaints) DESC",
 }[f1_sort]
 
+# Read from FCT_EQUITY_GAP_BY_TYPE -- the single canonical gap source.
+# Volume guard (>=500 per quintile) is built into that table; the checkbox
+# above is retained for UX but the table already enforces it.
 gap_sql = f"""
-WITH gaps AS (
-    SELECT
-        complaint_type,
-        MEDIAN(CASE WHEN income_quintile = 1 THEN equity_score END) AS q1_avg,
-        MEDIAN(CASE WHEN income_quintile = 5 THEN equity_score END) AS q5_avg,
-        SUM(request_count)                                          AS total_requests
-    FROM MARTS.FCT_EQUITY_SPLITS
-    WHERE income_quintile IN (1, 5)
-      AND request_count >= 10
-    GROUP BY complaint_type
-)
 SELECT
     complaint_type,
-    ROUND(q1_avg, 3)               AS q1_avg_equity,
-    ROUND(q5_avg, 3)               AS q5_avg_equity,
-    ROUND(q1_avg - q5_avg, 3)      AS equity_gap,
-    total_requests
-FROM gaps
-WHERE q1_avg IS NOT NULL
-  AND q5_avg IS NOT NULL
-  {volume_clause}
+    q1_n_complaints,
+    q5_n_complaints,
+    q1_n_complaints + q5_n_complaints  AS total_requests,
+    q1_p90_hours,
+    q5_p90_hours,
+    q1_over_q5_gap
+FROM MARTS.FCT_EQUITY_GAP_BY_TYPE
 ORDER BY {f1_order}
 LIMIT 10
 """
@@ -470,60 +461,77 @@ with st.spinner("Loading Finding 1..."):
 if not gap_df.empty:
     gap_df["agency"] = gap_df["complaint_type"].map(_AGENCY).fillna("Various")
 
-    _f1_chart_col = "total_requests" if f1_sort == "Total requests desc" else "equity_gap"
+    _f1_chart_col = "total_requests" if f1_sort == "Total requests desc" else "q1_over_q5_gap"
     fig = px.bar(
         gap_df.sort_values(_f1_chart_col, ascending=True),
-        x="equity_gap",
+        x="q1_over_q5_gap",
         y="complaint_type",
-        color="equity_gap",
+        color="q1_over_q5_gap",
         color_continuous_scale="RdYlGn_r",
+        color_continuous_midpoint=1.0,
         orientation="h",
-        hover_data={"agency": True, "q1_avg_equity": True, "q5_avg_equity": True, "total_requests": True},
-        labels={
-            "equity_gap": "Equity gap (Q1 avg − Q5 avg equity score)",
-            "complaint_type": "Complaint Type",
-            "agency": "Agency",
-            "q1_avg_equity": "Q1 avg equity score",
-            "q5_avg_equity": "Q5 avg equity score",
-            "total_requests": "Total requests",
+        hover_data={
+            "agency":          True,
+            "q1_p90_hours":    True,
+            "q5_p90_hours":    True,
+            "total_requests":  True,
+            "q1_n_complaints": True,
+            "q5_n_complaints": True,
         },
-        title="Top 10 complaint types by equity gap (Q1 − Q5 avg equity score)",
+        labels={
+            "q1_over_q5_gap":   "Q1 / Q5 median tract P90 (ratio)",
+            "complaint_type":   "Complaint Type",
+            "agency":           "Agency",
+            "q1_p90_hours":     "Q1 median P90 (hrs)",
+            "q5_p90_hours":     "Q5 median P90 (hrs)",
+            "total_requests":   "Total requests",
+            "q1_n_complaints":  "Q1 complaints",
+            "q5_n_complaints":  "Q5 complaints",
+        },
+        title="Top 10 complaint types -- Q1 / Q5 median tract P90 gap (1.0 = equal)",
     )
+    fig.add_vline(x=1.0, line_dash="dash", line_color="grey", annotation_text="Equal (1.0)")
     fig.update_layout(coloraxis_showscale=False, yaxis_title=None)
     st.plotly_chart(fig, use_container_width=True, config=_chart_config)
     st.caption(
-        "**How to read:** Each bar = one complaint type. Bar length = equity gap (Q1 avg equity minus Q5 avg equity). "
-        "Longer bar = more unequal treatment by income. The responsible agency is shown in the hover tooltip. "
-        "Low-volume types (flagged in the table below) may have unreliable gaps due to small sample sizes."
+        "**How to read:** Bar length = ratio of Q1 to Q5 median tract P90 (median P90 hours, "
+        ">=30 complaints per tract cell, bilateral >=500 complaint guard). "
+        "Bar > 1.0 = Q1 low-income tracts wait longer at P90. "
+        "Bar < 1.0 = Q5 high-income tracts wait longer (may be complaint-mix confound). "
+        "Dashed line at 1.0 = equal service. Source: FCT_EQUITY_GAP_BY_TYPE."
     )
 
     st.markdown("**Details for the above complaint types:**")
     _gap_tbl = (
-        gap_df[["complaint_type", "agency", "total_requests", "q1_avg_equity", "q5_avg_equity", "equity_gap"]]
+        gap_df[["complaint_type", "agency", "q1_n_complaints", "q5_n_complaints",
+                "q1_p90_hours", "q5_p90_hours", "q1_over_q5_gap"]]
         .rename(columns={
-            "complaint_type": "Complaint Type",
-            "agency":         "Agency",
-            "total_requests": "Total Requests",
-            "q1_avg_equity":  "Q1 Avg Equity",
-            "q5_avg_equity":  "Q5 Avg Equity",
-            "equity_gap":     "Gap (Q1-Q5)",
+            "complaint_type":   "Complaint Type",
+            "agency":           "Agency",
+            "q1_n_complaints":  "Q1 Complaints",
+            "q5_n_complaints":  "Q5 Complaints",
+            "q1_p90_hours":     "Q1 P90 (hrs)",
+            "q5_p90_hours":     "Q5 P90 (hrs)",
+            "q1_over_q5_gap":   "Gap (Q1/Q5)",
         })
     )
     st.dataframe(
         _gap_tbl,
         use_container_width=True,
         column_config={
-            "Total Requests": st.column_config.NumberColumn(format="%d", help="Fewer than 500 = low volume, gap may be noise."),
-            "Q1 Avg Equity":  st.column_config.NumberColumn(format="%.3f"),
-            "Q5 Avg Equity":  st.column_config.NumberColumn(format="%.3f"),
-            "Gap (Q1-Q5)":    st.column_config.NumberColumn(format="%.3f", help="Positive = Q1 waits longer than Q5."),
+            "Q1 Complaints": st.column_config.NumberColumn(format="%d"),
+            "Q5 Complaints": st.column_config.NumberColumn(format="%d"),
+            "Q1 P90 (hrs)":  st.column_config.NumberColumn(format="%.1f",
+                help="Median of per-tract P90s across Q1 tracts (>=30 complaints/tract)."),
+            "Q5 P90 (hrs)":  st.column_config.NumberColumn(format="%.1f"),
+            "Gap (Q1/Q5)":   st.column_config.NumberColumn(format="%.2f",
+                help=">1.0 = Q1 waits longer. <1.0 = Q5 waits longer (check for confound)."),
         },
         hide_index=True,
     )
     st.caption(
-        "**How to read:** Click any column header to sort. "
-        "Complaint types with fewer than 500 total requests have statistically unreliable gaps -- "
-        "focus on high-volume types where the gap reflects real systemic patterns."
+        "All rows cleared the bilateral >=500 complaint volume guard. "
+        "Gap = Q1 median tract P90 / Q5 median tract P90 -- same definition as the headline KPI above."
     )
 else:
     st.info("No data found -- run the pipeline first.")
@@ -821,12 +829,14 @@ if not gap_df.empty and not heatmap_df.empty and not trend_df.empty:
     # Ensure the cache table exists (runs once per server lifetime via @st.cache_resource)
     _ensure_cache_table()
 
-    # ── Fix 1: volume-tagged gap_json with low-volume flag ───────────────────
-    gap_records = gap_df[["complaint_type", "agency", "q1_avg_equity", "q5_avg_equity", "equity_gap", "total_requests"]].to_dict("records")
+    # gap_json now uses median P90 hours from FCT_EQUITY_GAP_BY_TYPE
+    gap_records = gap_df[["complaint_type", "agency", "q1_p90_hours", "q5_p90_hours",
+                           "q1_over_q5_gap", "q1_n_complaints", "q5_n_complaints"]].to_dict("records")
     gap_json = "\n".join(
-        f"  {r['complaint_type']} (agency: {r['agency']}): gap={r['equity_gap']:.3f}, "
-        f"Q1={r['q1_avg_equity']:.2f}, Q5={r['q5_avg_equity']:.2f}, "
-        f"volume={int(r['total_requests']):,}{' [LOW VOLUME -- treat gap with caution]' if r['total_requests'] < 500 else ''}"
+        f"  {r['complaint_type']} (agency: {r['agency']}): "
+        f"Q1 median P90={r['q1_p90_hours']} hrs, Q5 median P90={r['q5_p90_hours']} hrs, "
+        f"gap={r['q1_over_q5_gap']:.2f}x "
+        f"(Q1 n={int(r['q1_n_complaints']):,}, Q5 n={int(r['q5_n_complaints']):,})"
         for r in gap_records
     )
 
