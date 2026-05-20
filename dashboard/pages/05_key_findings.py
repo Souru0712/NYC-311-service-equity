@@ -182,6 +182,73 @@ def _store_synthesis(data_hash: str, text: str) -> None:
         pass
 
 
+def _generate_pdf(sort_context: str, body: str) -> bytes:
+    """Render the synthesis markdown as a clean PDF report."""
+    from fpdf import FPDF
+
+    # Normalise unicode characters that Helvetica can't encode
+    _clean = (
+        body
+        .replace("—", "-").replace("–", "-")
+        .replace("’", "'").replace("‘", "'")
+        .replace("“", '"').replace("”", '"')
+        .replace("×", "x").replace("→", "->")
+        .replace("←", "<-").replace("≤", "<=")
+        .replace("≥", ">=").replace("±", "+/-")
+    )
+
+    pdf = FPDF()
+    pdf.set_margins(20, 20, 20)
+    pdf.add_page()
+
+    # Header block
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.multi_cell(0, 10, "NYC 311 Service Equity Report")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, f"Generated: {date.today().strftime('%B %d, %Y')}")
+    pdf.ln(5)
+    pdf.cell(0, 6, f"Sort context: {sort_context}")
+    pdf.ln(8)
+    pdf.set_draw_color(180, 180, 180)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(6)
+
+    for raw_line in _clean.split("\n"):
+        line = raw_line.strip()
+
+        if not line or line == "---":
+            pdf.ln(4)
+            continue
+
+        # **Section Header** — bold heading
+        if line.startswith("**") and line.endswith("**") and line.count("**") == 2:
+            heading = line.strip("*").strip()
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.ln(3)
+            pdf.multi_cell(0, 7, heading)
+            pdf.ln(1)
+            continue
+
+        # Numbered list item
+        if len(line) > 2 and line[0].isdigit() and line[1] in ".)" :
+            pdf.set_font("Helvetica", "", 10)
+            pdf.multi_cell(0, 6, line)
+            continue
+
+        # Bullet list
+        if line.startswith("- ") or line.startswith("* "):
+            pdf.set_font("Helvetica", "", 10)
+            pdf.multi_cell(0, 6, "• " + line[2:])
+            continue
+
+        # Strip inline bold markers for body text
+        line = line.replace("**", "")
+        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 6, line)
+
+    return bytes(pdf.output())
+
+
 def _call_groq(prompt: str) -> str:
     api_key = (
         st.secrets.get("GROQ_API_KEY")
@@ -776,10 +843,43 @@ if not gap_df.empty and not heatmap_df.empty and not trend_df.empty and not head
     if cached and cached[0] == "complete":
         # Stored and ready — display in styled callout box
         st.session_state.pop("synthesis", None)
+        synthesis_text = cached[1]
         st.markdown(
-            f'<div class="synthesis-box">{cached[1]}</div>',
+            f'<div class="synthesis-box">{synthesis_text}</div>',
             unsafe_allow_html=True,
         )
+
+        # ── Copy & download buttons ───────────────────────────────────────────
+        report_date = date.today().strftime("%Y_%m_%d")
+        report_name = f"nyc_311_service_equity_report_{report_date}.pdf"
+        pdf_bytes   = _generate_pdf(f1_sort, synthesis_text)
+
+        _btn1, _btn2 = st.columns([1, 1])
+
+        _btn1.download_button(
+            label="⬇️ Download report",
+            data=pdf_bytes,
+            file_name=report_name,
+            mime="application/pdf",
+            use_container_width=True,
+        )
+
+        # Copy via hidden textarea + JS clipboard API
+        import streamlit.components.v1 as _components
+        _safe = synthesis_text.replace("`", "\\`").replace("$", "\\$")
+        _btn2.empty()
+        with _btn2:
+            _components.html(f"""
+                <button onclick="navigator.clipboard.writeText(`{_safe}`).then(
+                    () => this.innerText = '✓ Copied',
+                    () => this.innerText = '⚠ Copy failed'
+                )"
+                style="width:100%;height:38px;background:#262730;color:white;
+                       border:1px solid #555;border-radius:6px;cursor:pointer;
+                       font-size:14px;font-family:sans-serif;">
+                    📋 Copy to clipboard
+                </button>
+            """, height=50)
 
     elif cached and cached[0] == "pending":
         # Another user already clicked — don't call Groq again
