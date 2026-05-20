@@ -183,7 +183,7 @@ def _store_synthesis(data_hash: str, text: str) -> None:
 
 
 def _generate_pdf(sort_context: str, body: str) -> bytes:
-    “””Render the synthesis markdown as a clean PDF report.”””
+    # Render the synthesis markdown as a clean PDF report.
     from fpdf import FPDF
 
     def _s(text: str) -> str:
