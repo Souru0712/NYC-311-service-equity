@@ -183,68 +183,61 @@ def _store_synthesis(data_hash: str, text: str) -> None:
 
 
 def _generate_pdf(sort_context: str, body: str) -> bytes:
-    """Render the synthesis markdown as a clean PDF report."""
+    “””Render the synthesis markdown as a clean PDF report.”””
     from fpdf import FPDF
 
-    # Normalise unicode characters that Helvetica can't encode
-    _clean = (
-        body
-        .replace("—", "-").replace("–", "-")
-        .replace("’", "'").replace("‘", "'")
-        .replace("“", '"').replace("”", '"')
-        .replace("×", "x").replace("→", "->")
-        .replace("←", "<-").replace("≤", "<=")
-        .replace("≥", ">=").replace("±", "+/-")
-    )
+    def _s(text: str) -> str:
+        “””Sanitize to latin-1 — replaces any character Helvetica can’t encode.”””
+        return text.encode(“latin-1”, errors=”replace”).decode(“latin-1”)
 
     pdf = FPDF()
     pdf.set_margins(20, 20, 20)
     pdf.add_page()
 
     # Header block
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.multi_cell(0, 10, "NYC 311 Service Equity Report")
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, f"Generated: {date.today().strftime('%B %d, %Y')}")
+    pdf.set_font(“Helvetica”, “B”, 18)
+    pdf.multi_cell(0, 10, _s(“NYC 311 Service Equity Report”))
+    pdf.set_font(“Helvetica”, “”, 10)
+    pdf.cell(0, 6, _s(f”Generated: {date.today().strftime(‘%B %d, %Y’)}”))
     pdf.ln(5)
-    pdf.cell(0, 6, f"Sort context: {sort_context}")
+    pdf.cell(0, 6, _s(f”Sort context: {sort_context}”))
     pdf.ln(8)
     pdf.set_draw_color(180, 180, 180)
     pdf.line(20, pdf.get_y(), 190, pdf.get_y())
     pdf.ln(6)
 
-    for raw_line in _clean.split("\n"):
+    for raw_line in body.split(“\n”):
         line = raw_line.strip()
 
-        if not line or line == "---":
+        if not line or line == “---”:
             pdf.ln(4)
             continue
 
         # **Section Header** — bold heading
-        if line.startswith("**") and line.endswith("**") and line.count("**") == 2:
-            heading = line.strip("*").strip()
-            pdf.set_font("Helvetica", "B", 12)
+        if line.startswith(“**”) and line.endswith(“**”) and line.count(“**”) == 2:
+            heading = line.strip(“*”).strip()
+            pdf.set_font(“Helvetica”, “B”, 12)
             pdf.ln(3)
-            pdf.multi_cell(0, 7, heading)
+            pdf.multi_cell(0, 7, _s(heading))
             pdf.ln(1)
             continue
 
         # Numbered list item
-        if len(line) > 2 and line[0].isdigit() and line[1] in ".)" :
-            pdf.set_font("Helvetica", "", 10)
-            pdf.multi_cell(0, 6, line)
+        if len(line) > 2 and line[0].isdigit() and line[1] in “.)”:
+            pdf.set_font(“Helvetica”, “”, 10)
+            pdf.multi_cell(0, 6, _s(line))
             continue
 
         # Bullet list
-        if line.startswith("- ") or line.startswith("* "):
-            pdf.set_font("Helvetica", "", 10)
-            pdf.multi_cell(0, 6, "• " + line[2:])
+        if line.startswith(“- “) or line.startswith(“* “):
+            pdf.set_font(“Helvetica”, “”, 10)
+            pdf.multi_cell(0, 6, _s(“- “ + line[2:]))
             continue
 
         # Strip inline bold markers for body text
-        line = line.replace("**", "")
-        pdf.set_font("Helvetica", "", 10)
-        pdf.multi_cell(0, 6, line)
+        line = line.replace(“**”, “”)
+        pdf.set_font(“Helvetica”, “”, 10)
+        pdf.multi_cell(0, 6, _s(line))
 
     return bytes(pdf.output())
 
@@ -701,8 +694,11 @@ else:
 st.divider()
 
 # ── AI synthesis ──────────────────────────────────────────────────────────────
-st.subheader("④ What the data tells us — and what should happen next")
-st.caption("AI-generated synthesis stored in Snowflake. Groq is called only once per data refresh.")
+import streamlit.components.v1 as _components
+
+_h_col, _dl_col, _cp_col = st.columns([5, 1.2, 1.2])
+_h_col.subheader("④ What the data tells us — and what should happen next")
+_h_col.caption("AI-generated synthesis stored in Snowflake. Groq is called only once per data refresh.")
 
 # Extra context from other dashboard pages fed into Groq
 quintile_p90_df = run_query("""
@@ -849,35 +845,30 @@ if not gap_df.empty and not heatmap_df.empty and not trend_df.empty and not head
             unsafe_allow_html=True,
         )
 
-        # ── Copy & download buttons ───────────────────────────────────────────
+        # ── Buttons next to the ④ heading ────────────────────────────────────
         report_date = date.today().strftime("%Y_%m_%d")
         report_name = f"nyc_311_service_equity_report_{report_date}.pdf"
         pdf_bytes   = _generate_pdf(f1_sort, synthesis_text)
 
-        _btn1, _btn2 = st.columns([1, 1])
-
-        _btn1.download_button(
-            label="⬇️ Download report",
+        _dl_col.download_button(
+            label="⬇️ Download",
             data=pdf_bytes,
             file_name=report_name,
             mime="application/pdf",
             use_container_width=True,
         )
 
-        # Copy via hidden textarea + JS clipboard API
-        import streamlit.components.v1 as _components
         _safe = synthesis_text.replace("`", "\\`").replace("$", "\\$")
-        _btn2.empty()
-        with _btn2:
+        with _cp_col:
             _components.html(f"""
                 <button onclick="navigator.clipboard.writeText(`{_safe}`).then(
                     () => this.innerText = '✓ Copied',
-                    () => this.innerText = '⚠ Copy failed'
+                    () => this.innerText = '⚠ Failed'
                 )"
                 style="width:100%;height:38px;background:#262730;color:white;
                        border:1px solid #555;border-radius:6px;cursor:pointer;
-                       font-size:14px;font-family:sans-serif;">
-                    📋 Copy to clipboard
+                       font-size:13px;font-family:sans-serif;">
+                    📋 Copy
                 </button>
             """, height=50)
 
