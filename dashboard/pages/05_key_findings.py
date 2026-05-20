@@ -24,35 +24,47 @@ _chart_config = {"displayModeBar": True, "displaylogo": False,
 
 # ── Claude synthesis ──────────────────────────────────────────────────────────
 _SYNTHESIS_SYSTEM = """\
-You are a plain-language chart narrator for a public 311 service-equity dashboard. \
-Your sole role is to describe what each data visualization shows in clear, accessible \
-language for a non-technical audience. You do not draw equity conclusions, make policy \
-recommendations, or assess whether income-based inequity exists -- those conclusions are \
-provided to you as locked verified findings and you must restate them exactly as written \
-without extension or interpretation.
+You are generating descriptive text for a data dashboard. You do NOT analyze
+or interpret. You restate verified findings and describe what charts show.
 
-LOCKED VERIFIED FINDINGS -- restate these exactly, do not modify, extend, or contradict:
-1. At the median, 311 response time is equal across income quintiles citywide (P50 8-10 hrs all quintiles).
-2. The real gap is within complaint type: NYPD noise complaints resolve 1.5-2x slower in Q1 tracts \
-(Q1 median tract P90 3-4 hrs vs Q5 2 hrs), consistent across four categories, 1.7M+ Q1 requests.
-3. DOT street-sign repairs: Q1 median P90 = 174 days vs Q5 = 37 days (4.7x), lower volume (n=535).
-4. The aggregate Q1>Q5 claim is a complaint-mix confound. Helicopter noise: identical P90 in both \
-quintiles (~26,600 hrs), Q5 files it 62x more. The aggregate gap is a volume-composition artifact.
-5. Both quintiles have idiosyncratic slow tails. Cross-quintile aggregates are uninformative.
-6. An initial 3.7x Real Time Enforcement finding was invalidated -- Q5 lacked sufficient volume for \
-a defensible comparison.
-7. Equity is only answerable within complaint type.
+VERIFIED FINDINGS -- these are FACTS. Restate them; never contradict them:
+1. At the median, 311 response time is essentially EQUAL across all five
+   income quintiles citywide (P50 approx. 8-10 hrs for every quintile). There is
+   NO broad income-based equity gap at the median.
+2. The real, defensible gap is WITHIN specific complaint types. The strongest
+   finding is the NYPD noise cluster: low-income (Q1) tracts wait 1.5-2x
+   longer at P90 than high-income (Q5) tracts, consistent across FOUR
+   independent noise categories (Residential, Commercial, Vehicle,
+   Street/Sidewalk), spanning 1.7M+ Q1 requests. Absolute values are modest
+   (Q1 P90 approx. 3-4 hrs vs Q5 approx. 2 hrs).
+3. Street Sign -- Damaged shows a larger ratio (4.7x, 174 vs 37 days median
+   P90) but on LOW volume (approx. 535 Q1 requests) -- always state it as lower-volume.
+4. The AGGREGATE P90 across all complaint types INVERTS (Q5 appears slower).
+   This is a complaint-MIX CONFOUND, not a service gap: e.g. helicopter-noise
+   complaints have near-identical P90s in Q1 and Q5 (~26,600 hrs) but Q5
+   files them 62x more often. Both quintiles have idiosyncratic slow tails
+   (Q5: helicopter noise, tree requests; Q1: smoking, mobile food vendor).
+   Cross-quintile AGGREGATE comparison is therefore uninformative in EITHER
+   direction.
 
-HARD PROHIBITIONS -- violating any of these makes the output unusable:
-- Never state that low-income neighborhoods wait longer overall or on average.
-- Never describe the monthly trend as an equity gap -- call it a response-time trend.
-- Never attribute a complaint type's slowness to the neighborhood that files it without \
-  confirming the P90 is different between quintiles for that specific type.
-- Never compute, infer, or state any ratio or direction not explicitly provided in the input.
-- Never contradict, qualify, or extend the seven locked findings above.
+ABSOLUTE PROHIBITIONS:
+- NEVER claim low-income tracts wait longer overall or at the median.
+- NEVER call the monthly trend an "equity gap"; it is a response-time trend
+  influenced by complaint mix.
+- NEVER recommend that an agency "improve response times" on a complaint type
+  without stating that type's gap survives a volume floor AND comparing its
+  P90 across quintiles.
+- NEVER describe structurally-slow tail types (smoking, mobile food vendor,
+  new tree request, helicopter noise, food establishment) as service-quality
+  failures -- they are equally slow across quintiles by their nature.
+- NEVER attribute a gap to agency bias.
+- NEVER output policy recommendations of any kind.
+- State ONLY numbers present in the data provided. Do not invent figures.
 
-FORMAT: one short paragraph per chart/finding, plain English, no jargon, no markdown headers. \
-Total response under 400 words.\
+TASK: Write 1-2 plain sentences per chart describing what it displays. Lead
+with finding 2 (noise cluster), then 3 (street sign, lower volume), then 4
+(the confound). Do not add analysis beyond the verified findings above.
+Total response under 400 words. Plain English, no markdown headers.\
 """
 
 
@@ -709,45 +721,36 @@ else:
 st.divider()
 
 # ── ④ Verified findings -- static, human-written, cannot drift ─────────────────
-st.subheader("④ Verified Findings")
-st.caption("Human-written and locked to the numbers in the charts above. These are the only claims this dashboard makes.")
+st.subheader("④ Key Findings")
+st.caption("Human-written and locked to verified numbers. These are the only claims this dashboard makes.")
 st.markdown("""
-**① At the median, response time is equal across income quintiles citywide.**
-P50 response time is 8-10 hours across all five income quintiles. For the typical 311
-complaint, low-income and high-income neighborhoods resolve at the same speed.
+**At the median, 311 service is roughly equal by neighborhood income.**
+The typical complaint resolves in about 8-10 hours (P50) regardless of tract income
+quintile. There is no broad income-based service gap at the median.
 
-**② The real gap is within complaint type, not across them -- NYPD noise is the headline.**
-NYPD takes 1.5-2× longer on noise complaints in low-income tracts (Q1 median tract P90:
-3-4 hrs vs Q5: 2 hrs), consistent across four independent categories -- Noise Residential,
-Street/Sidewalk, Vehicle, and Commercial -- covering 1.7M+ low-income-tract requests.
-Consistency across four categories handled by the same agency is more convincing than any
-single large number.
+**The real inequity is narrow and complaint-specific.**
+NYPD noise complaints resolve 1.5-2x slower at P90 in low-income tracts than in
+high-income tracts, consistently across four independent noise categories (Residential,
+Commercial, Vehicle, Street/Sidewalk) and 1.7M+ low-income-tract requests. Absolute
+waits are short (approx. 3-4 hrs vs approx. 2 hrs) -- the gap is consistent and
+high-confidence, not high-stakes per incident.
 
-**③ DOT street-sign repairs show the largest gap but at lower volume.**
-Q1 median tract P90 = 174 days vs Q5 = 37 days (4.7×). Q1 n = 535 complaints -- the gap
-is statistically supported but carries less confidence than the noise cluster.
+**A larger ratio exists on low volume.**
+Street Sign -- Damaged repairs show a 4.7x gap (approx. 174 vs 37 days median P90),
+but on only approx. 535 low-income-tract requests -- striking, but not high-confidence.
 
-**④ The aggregate "low-income waits longer" claim is confounded by complaint mix.**
-When all complaint types are pooled, Q5 P90 actually exceeds Q1 P90 (813 hrs vs 474 hrs).
-This inverts because Q5 tracts file structurally slow, often unresolvable complaint types
-at far higher rates -- helicopter noise is filed 62× more often by Q5 than Q1, with
-identical P90s in both quintiles (~26,600 hrs). The aggregate gap is a volume-composition
-artifact, not a service-quality signal.
+**Aggregate income comparisons are confounded -- and we verified it.**
+Comparing all complaint types pooled, high-income tracts appear slower. This is a
+complaint-mix artifact: helicopter-noise complaints have near-identical resolution times
+in low- and high-income tracts (~26,600 hrs P90 each), but high-income tracts file them
+62x more often. Both income groups have their own structurally-slow complaint types.
+Equity is only a meaningful question within a complaint type, not across the aggregate.
 
-**⑤ Both quintiles have their own idiosyncratic slow tails.**
-Q1's tail is dominated by Smoking enforcement (P90 = 35,525 hrs) and Mobile Food Vendor
-complaints. Q5's by helicopter noise and tree planting requests. Both tails reflect
-structural unresolvability, not income-based inequity. Cross-quintile aggregates are
-uninformative in either direction.
-
-**⑥ One early finding did not survive the corrected methodology.**
-An initial finding of a 3.7× Real Time Enforcement gap was invalidated when the method
-required both quintiles to clear a 500-complaint volume floor. Q5 tracts rarely file
-Real Time Enforcement complaints, so no defensible Q5 baseline exists.
-
-**⑦ Equity is only answerable within complaint type.**
-Hold the complaint type constant, compare Q1 vs Q5 median tract P90. The noise cluster
-holds at that grain. Aggregate comparisons do not.
+**Methodology note.**
+Equity gaps are computed per complaint type as the ratio of median tract-level P90
+response times between the lowest- and highest-income quintiles, with a minimum-volume
+floor (>=30 complaints per tract cell, >=500 per quintile per type) to suppress
+small-sample noise.
 """)
 
 st.divider()
@@ -992,50 +995,32 @@ if not gap_df.empty and not heatmap_df.empty and not trend_df.empty:
     else:
         # No cached row -- only dev can trigger generation
         prompt = f"""\
-METHODOLOGY NOTE -- read before analysing any number:
-Aggregate Q1-vs-Q5 comparisons (averaging equity scores across all complaint types) are \
-confounded by complaint-mix and are NOT provided. Reason: Q5 tracts file structurally \
-slow complaint types (helicopter noise, tree requests) at much higher rates than Q1 -- \
-confirmed via tail decomposition showing identical P90s in both quintiles for those types \
-(helicopter: Q1 P90 ~26,644 hrs, Q5 P90 ~26,317 hrs) but Q5 filing them 62× more often. \
-The aggregate gap inverts and is meaningless. Equity is only answerable WITHIN complaint type. \
-All gap figures below are within-complaint-type comparisons.
+Describe each of the following charts in 1-2 plain sentences. Lead with the \
+NYPD noise cluster finding (finding 2), then Street Sign lower volume (finding 3), \
+then the confound explanation (finding 4). Use only the numbers below. \
+Do not add recommendations, interpretations, or claims beyond what the \
+verified findings in your instructions state.
 
-CONFIRMED EQUITY GAPS -- within-complaint-type, median tract P90, volume floor ≥30/tract, \
-bilateral ≥500 complaint guard. q1_over_q5_gap > 1.0 means low-income tracts wait longer. \
-These are the only defensible headline numbers. Do not compute or infer any other gap.
+CONFIRMED GAPS (within-complaint-type, median tract P90, volume-floored):
 {top_gaps_json}
 
-FINDING 1 -- Top complaint types by Q1-vs-Q5 gap (same methodology, sorted by {f1_sort}):
+CHART 1 -- Top complaint types by Q1 vs Q5 gap, sorted by {f1_sort}:
 {gap_json}
 
-FINDING 2 -- Borough × income quintile median equity score heatmap (1.0 = city median wait):
-Use this to distinguish geographic disparity (entire borough elevated) from income disparity \
-(gradient within a borough from Q1 to Q5). Note: these equity scores are per-complaint-type \
-medians and are more reliable than a cross-type aggregate.
+CHART 2 -- Borough x income quintile median equity score (1.0 = city median):
 {heatmap_json}
 
-FINDING 3 -- Monthly P90 response time by quintile (raw hours, pooled complaints per month):
-This is a volume-weighted trend across all complaint types. It shows whether service speed \
-has improved or worsened over time by income group. It is NOT an equity-gap series -- it \
-inherits the complaint-mix confound. Label it as a response-time trend, not an equity gap. \
-Look for COVID-era disruption (2020-2021), seasonal patterns, and long-run direction.
+CHART 3 -- Monthly P90 response time by quintile, pooled per month (raw hours):
+NOTE -- this is a response-time trend, NOT an equity-gap series.
 {trend_json}
 
-TOP 10 COMPLAINT TYPES BY TOTAL VOLUME:
-High-volume + high-gap (from confirmed gaps above) = most urgent. \
-High-volume + low or negative gap = agency performing equitably under pressure.
+CHART 4 -- Top 10 complaint types by total volume:
 {top_complaints_json}
 
-SLOWEST COMPLAINT TYPES PER BOROUGH -- top 3 by median P90 (500+ requests only):
-{borough_complaint_json}
-
-AGENCY BREAKDOWN -- total requests, Q1 median equity, Q5 median equity, gap:
-{agency_json}
-
-Produce your full analysis following the framework in your instructions. \
-Ground every claim in the confirmed gap numbers above. \
-Do not cite aggregate Q1-vs-Q5 equity scores -- they are confounded and not provided.\
+CHART 5 -- Slowest complaint types per borough (500+ requests only):
+NOTE -- types appearing here may be structurally slow in ALL quintiles. \
+Do not prescribe improvements without cross-quintile comparison.
+{borough_complaint_json}\
 """
         if _dev:
             st.info("No AI synthesis cached for this data + sort combination.")
