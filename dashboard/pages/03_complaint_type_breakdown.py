@@ -59,11 +59,13 @@ if df.empty:
     st.warning("No data available.")
     st.stop()
 
-metric = st.radio(
+_metric_map = {"p90": "p90_hours", "p50": "p50_hours", "complaint_count": "complaint_count"}
+metric_label = st.radio(
     "Color heatmap by",
-    options=["p90_hours", "p50_hours", "complaint_count"],
+    options=list(_metric_map.keys()),
     horizontal=True,
 )
+metric = _metric_map[metric_label]
 
 # Show all complaint types — height scales automatically in chart_helpers
 st.plotly_chart(
@@ -72,13 +74,13 @@ st.plotly_chart(
 )
 
 _metric_explanations = {
-    "p90_hours": (
+    "p90": (
         "🔴 **Red = longer resolution time** in that borough for this complaint type. "
         "A dark red cell means the worst-served 10% of residents waited a very long time — "
         "a genuine service problem worth investigating. "
         "🟢 **Green = resolves quickly.**"
     ),
-    "p50_hours": (
+    "p50": (
         "🔴 **Red = longer median resolution time** — the *typical* resident in that borough "
         "waited a long time for this complaint type to be resolved. "
         "🟢 **Green = typical resident resolved quickly.**"
@@ -90,7 +92,7 @@ _metric_explanations = {
         "🟢 **Green = fewer complaints filed.**"
     ),
 }
-st.caption(_metric_explanations[metric])
+st.caption(_metric_explanations[metric_label])
 
 top10 = (
     df.groupby("complaint_type")

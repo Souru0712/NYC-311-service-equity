@@ -76,9 +76,9 @@ bottom = quintile_df[quintile_df["income_quintile"] == 1]["avg_p90_hours"].value
 top = quintile_df[quintile_df["income_quintile"] == 5]["avg_p90_hours"].values
 if bottom.size and top.size and top[0]:
     col1, col2, col3 = st.columns(3)
-    col1.metric("Bottom quintile avg P90 (hrs)", f"{bottom[0]:.1f}")
-    col2.metric("Top quintile avg P90 (hrs)", f"{top[0]:.1f}")
-    col3.metric("Equity ratio (bottom / top)", f"{bottom[0] / top[0]:.2f}×")
+    col1.metric("Q1 P90 (hrs)", f"{bottom[0]:.1f}")
+    col2.metric("Q5 P90 (hrs)", f"{top[0]:.1f}")
+    col3.metric("Equity ratio (Q1 / Q5)", f"{bottom[0] / top[0]:.2f}×")
 
 st.plotly_chart(
     equity_bar(

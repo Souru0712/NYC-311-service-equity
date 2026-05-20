@@ -1748,72 +1748,16 @@ st.divider()
 # ── Key Metrics Explained ─────────────────────────────────────────────────────
 st.subheader("Key Metrics Explained")
 
-st.markdown("##### Response Time")
 st.markdown("""
-Response time is measured in **hours** from when a 311 request is submitted to when the
-assigned agency marks it as resolved.
+All response times are in **hours**. Percentiles are computed per tract — not city-wide —
+so each metric reflects that specific neighborhood's own complaint history.
 
-This dashboard uses **percentiles** rather than averages because averages are easily skewed
-by extreme outliers (a single complaint that took 6 months would distort the whole borough's average).
-
-**Important:** all percentiles are computed **within a single tract over its complaint history**
-— not across the city. A P90 of 72 hours for a tract means that 90% of complaints of that
-type filed in *that specific neighborhood* resolved within 72 hours, based on its historical record.
-It is not saying 90% of NYC complaints resolved in 72 hours.
-
-| Metric | What it means | Scope |
+| Metric | SQL | Meaning |
 |---|---|---|
-| **P50 (median)** | Half of this tract's complaints resolved faster, half slower | Per tract, over time |
-| **P75** | 75% of this tract's complaints resolved within this time | Per tract, over time |
-| **P90** | 90% of this tract's complaints resolved within this time — the worst-case experience for this neighborhood | Per tract, over time |
-
-This dashboard focuses on **P90** because it best captures whether the *worst-served* residents
-in a specific neighborhood are being left behind — independently of what happens elsewhere in the city.
-""")
-
-st.markdown("##### Equity Score")
-st.markdown("""
-The equity score is the core metric of this dashboard.
-
-> **Equity Score = This tract's P90 ÷ Median tract P90 for the same complaint type and month**
-
-Both the numerator and the denominator are tract-level P90s — not city-wide raw complaint
-averages. The numerator is this specific tract's historical worst-case response time (90th
-percentile of all complaints filed there). The denominator is the **median of all tract P90s**
-citywide for that complaint type — the middle value when you rank every neighborhood by its
-own P90.
-
-**Why this matters:**
-
-A volume-weighted city average is skewed by whichever boroughs file the most complaints for a
-given type. High-volume areas dominate the denominator, which either artificially inflates scores
-for tracts in under-represented areas or hides genuine inequity for low-volume tracts by averaging
-their slow service down against faster high-volume neighbors.
-
-Using the median of tract P90s fixes both problems:
-- Every neighborhood gets **one equal vote** in the baseline, regardless of complaint volume
-- The denominator reflects the **structural service pattern of a typical tract**, not the weighted
-  sum of complaint activity across the city
-- A score of 1.0 means this tract's worst-case experience matches the median neighborhood —
-  half of NYC tracts perform better, half perform worse
-
-**Concrete example:**
-Noise complaints are concentrated in Manhattan where NYPD responds in ~2 hours. Under a
-volume-weighted average, the baseline collapses to ~2 hours. A Bronx tract resolving the same
-complaints in 4 hours scores 2.0 — looks like a crisis. Under the median-tract baseline, the
-4-hour Bronx tract is compared against the actual midpoint of all neighborhood experiences, not
-Manhattan's volume. The score reflects reality.
-
-| Score | Meaning |
-|---|---|
-| `1.0` | This tract matches the **typical NYC neighborhood** — half of tracts are faster, half are slower |
-| `1.5` | Residents here wait 50% longer than the typical neighborhood for this complaint type |
-| `2.0` | Residents here wait twice as long as the typical neighborhood |
-| `0.8` | Residents here wait 20% less — faster service than most neighborhoods |
-
-An equity score consistently above 1.0 for lower-income tracts — and below 1.0 for
-higher-income tracts — is evidence of a **systematic service disparity** that cannot be
-explained by complaint volume or geographic concentration alone.
+| **P90** | `PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY response_time_hours)` | 90% of complaints in this tract resolved within this many hours. Captures the worst-case experience per neighborhood — the 1 in 10 residents left waiting the longest. |
+| **city_p90** | `PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY p90_hours)` | The **median of all tract P90s** citywide for that complaint type and month. Every tract gets one equal vote regardless of complaint volume — prevents high-volume boroughs from skewing the baseline. |
+| **equity_score** | `p90_hours / NULLIF(city_p90, 0)` | This tract's P90 divided by `city_p90`. Score of `1.0` = matches the typical NYC neighborhood. `>1.0` = residents wait longer than the median tract. `<1.0` = faster than the median tract. |
+| **avg_equity_score** | `AVG(equity_score) WHERE income_quintile = N` | Average of equity scores across all tracts in an income quintile. Used to compare how income groups perform relative to the city median — a rising gap between Q1 and Q5 signals a structural disparity. |
 """)
 
 st.markdown(BACK_TO_TOP)

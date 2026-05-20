@@ -435,7 +435,8 @@ trend_sql = """
 SELECT
     request_month,
     income_quintile,
-    AVG(equity_score) AS avg_equity_score
+    AVG(equity_score)  AS avg_equity_score,
+    SUM(request_count) AS total_requests
 FROM MARTS.FCT_EQUITY_SPLITS
 WHERE income_quintile IN (1, 5)
 GROUP BY request_month, income_quintile
@@ -457,8 +458,9 @@ if not trend_df.empty:
         temp["season"]       = temp["month"].map(_season_name)
         temp["season_order"] = temp["month"].map(_season_order)
         seasonal_agg = (
-            temp.groupby(["yr","season","season_order","income_quintile"])["avg_equity_score"]
-            .mean().reset_index()
+            temp.groupby(["yr","season","season_order","income_quintile"])
+            .agg(avg_equity_score=("avg_equity_score","mean"), total_requests=("total_requests","sum"))
+            .reset_index()
             .sort_values(["yr","season_order"])
         )
         seasonal_agg["period"] = seasonal_agg["yr"].astype(str) + " " + seasonal_agg["season"]
@@ -511,6 +513,15 @@ if not trend_df.empty:
         "Use **monthly view** to pinpoint individual spikes; switch to **seasonal view** to see structural "
         "patterns without month-to-month noise."
     )
+
+    # Volume table — matches the current grouping (monthly or seasonal)
+    volume_table = pd.DataFrame({
+        "Period":       [str(p)[:10] if not seasonal_trend else p for p in period_order],
+        "Q1 Requests":  q1["total_requests"].fillna(0).astype(int).values,
+        "Q5 Requests":  q5["total_requests"].fillna(0).astype(int).values,
+    }).set_index("Period")
+    st.markdown(f"**Q1 vs Q5 request volume by {'season' if seasonal_trend else 'month'}:**")
+    st.dataframe(volume_table, use_container_width=True)
 else:
     st.info("No data found — run the pipeline first.")
 
@@ -519,6 +530,46 @@ st.divider()
 # ── AI synthesis ──────────────────────────────────────────────────────────────
 st.subheader("④ What the data tells us — and what should happen next")
 st.caption("AI-generated synthesis stored in Snowflake. Groq is called only once per data refresh.")
+
+# Extra context from other dashboard pages fed into Groq
+quintile_p90_df = run_query("""
+    SELECT income_quintile,
+           ROUND(AVG(p90_hours), 1)    AS avg_p90_hours,
+           ROUND(AVG(equity_score), 3) AS avg_equity_score
+    FROM MARTS.FCT_EQUITY_SPLITS
+    WHERE income_quintile IS NOT NULL
+    GROUP BY income_quintile
+    ORDER BY income_quintile
+""")
+
+top_complaints_df = run_query("""
+    SELECT complaint_type,
+           SUM(request_count)          AS total_requests,
+           ROUND(AVG(p90_hours), 1)    AS avg_p90_hours,
+           ROUND(AVG(equity_score), 3) AS avg_equity_score
+    FROM MARTS.FCT_EQUITY_SPLITS
+    GROUP BY complaint_type
+    ORDER BY total_requests DESC
+    LIMIT 10
+""")
+
+borough_complaint_df = run_query("""
+    WITH ranked AS (
+        SELECT borough, complaint_type,
+               ROUND(AVG(p90_hours), 1) AS avg_p90_hours,
+               SUM(request_count)       AS total_requests,
+               ROW_NUMBER() OVER (
+                   PARTITION BY borough ORDER BY AVG(p90_hours) DESC
+               ) AS rn
+        FROM MARTS.FCT_EQUITY_SPLITS
+        WHERE borough NOT IN ('UNSPECIFIED', '')
+        GROUP BY borough, complaint_type
+        HAVING SUM(request_count) >= 500
+    )
+    SELECT borough, complaint_type, avg_p90_hours, total_requests
+    FROM ranked WHERE rn <= 3
+    ORDER BY borough, rn
+""")
 
 if not gap_df.empty and not heatmap_df.empty and not trend_df.empty and not headline_df.empty:
 
@@ -553,12 +604,34 @@ if not gap_df.empty and not heatmap_df.empty and not trend_df.empty and not head
         )
     trend_json = "\n".join([_trend_line(trend_q1, "Q1"), _trend_line(trend_q5, "Q5")])
 
+    # Extra page context as JSON strings
+    quintile_p90_json = "\n".join(
+        f"  Q{int(r['income_quintile'])}: avg P90 = {r['avg_p90_hours']} hrs, "
+        f"equity score = {r['avg_equity_score']}"
+        for r in quintile_p90_df.to_dict("records")
+    ) if not quintile_p90_df.empty else "  no data"
+
+    top_complaints_json = "\n".join(
+        f"  {r['complaint_type']}: {int(r['total_requests']):,} requests, "
+        f"avg P90 = {r['avg_p90_hours']} hrs, equity score = {r['avg_equity_score']}"
+        for r in top_complaints_df.to_dict("records")
+    ) if not top_complaints_df.empty else "  no data"
+
+    borough_complaint_json = "\n".join(
+        f"  {r['borough']}: {r['complaint_type']} "
+        f"(avg P90 = {r['avg_p90_hours']} hrs, {int(r['total_requests']):,} requests)"
+        for r in borough_complaint_df.to_dict("records")
+    ) if not borough_complaint_df.empty else "  no data"
+
     row     = headline_df.iloc[0]
     q1_avg  = float(row["q1_avg_equity"])
     q5_avg  = float(row["q5_avg_equity"])
     ratio   = float(row["overall_ratio"])
 
-    data_hash = _data_hash(gap_json, heatmap_json, trend_json)
+    data_hash = _data_hash(
+        gap_json, heatmap_json,
+        trend_json + quintile_p90_json + top_complaints_json + borough_complaint_json,
+    )
 
     # Always check Snowflake first — zero API calls
     cached = _load_cached_synthesis(data_hash)
@@ -583,7 +656,7 @@ Overall equity gap:
   Q5 avg equity score: {q5_avg:.2f}
   Q1/Q5 ratio: {ratio:.2f}×
 
-Finding 1 — Top 10 complaint types by equity gap:
+Finding 1 — Top 10 complaint types by equity gap (Q1 vs Q5):
 {gap_json}
 
 Finding 2 — Borough × income quintile avg equity scores (1.0 = city average):
@@ -591,6 +664,15 @@ Finding 2 — Borough × income quintile avg equity scores (1.0 = city average):
 
 Finding 3 — Monthly equity trend Q1 vs Q5:
 {trend_json}
+
+Equity by Income page — avg P90 hours and equity score by income quintile (all complaint types):
+{quintile_p90_json}
+
+Complaint Type Breakdown page — top 10 complaint types by total volume:
+{top_complaints_json}
+
+Borough Map page — top 3 slowest complaint types per borough (500+ requests):
+{borough_complaint_json}
 
 Produce a root-cause assessment and actionable recommendations.\
 """
