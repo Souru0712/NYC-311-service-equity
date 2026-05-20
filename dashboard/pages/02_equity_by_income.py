@@ -10,8 +10,14 @@ import streamlit as st
 from utils.snowflake_conn import run_query
 from utils.chart_helpers import equity_bar, scatter_income_vs_wait
 from utils.styles import inject_css
+from utils.sidebar import setup_sidebar
 
+st.set_page_config(page_title="Equity by Income | NYC 311", page_icon="📊", layout="wide")
 inject_css()
+setup_sidebar()
+
+_chart_config = {"displayModeBar": True, "displaylogo": False,
+                 "modeBarButtonsToRemove": ["select2d", "lasso2d"]}
 
 st.header("Equity Score by Income Quintile")
 
@@ -92,7 +98,8 @@ WHERE complaint_type = '{selected_complaint}'
 GROUP BY income_quintile
 ORDER BY income_quintile
 """
-quintile_df = run_query(quintile_sql)
+with st.spinner("Loading data..."):
+    quintile_df = run_query(quintile_sql)
 
 if quintile_df.empty:
     st.warning("No data for this selection.")
@@ -114,6 +121,13 @@ st.plotly_chart(
         title=f"Avg Equity Score by Income Quintile — {selected_complaint}",
     ),
     use_container_width=True,
+    config=_chart_config,
+)
+st.caption(
+    "**How to read:** Each bar is one income quintile (Q1 = lowest income, Q5 = highest). "
+    "Bar height = average equity score across all tracts in that quintile. "
+    "A bar above 1.0 means that income group waits longer than the typical NYC neighborhood. "
+    "A clear upward slope from Q5 → Q1 confirms a systematic income-driven gap for this complaint type."
 )
 st.caption(
     "**Avg equity score** = the mean of all tract equity scores within that income quintile. "
@@ -138,8 +152,9 @@ WHERE complaint_type = '{selected_complaint}'
   {date_filter}
 GROUP BY tract_geoid, complaint_type, borough
 """
-scatter_df = run_query(scatter_sql)
-st.plotly_chart(scatter_income_vs_wait(scatter_df), use_container_width=True)
+with st.spinner("Loading scatter data..."):
+    scatter_df = run_query(scatter_sql)
+st.plotly_chart(scatter_income_vs_wait(scatter_df), use_container_width=True, config=_chart_config)
 st.caption(
     f"Each dot is one census tract's median income vs its P90 response time for **{selected_complaint}**. "
     "A downward slope (higher income → lower P90) confirms an income-driven equity gap for this complaint type and its responsible agency. "

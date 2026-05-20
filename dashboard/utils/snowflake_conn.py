@@ -17,7 +17,7 @@ def get_snowflake_conn():
     )
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def run_query(sql: str) -> pd.DataFrame:
     conn = get_snowflake_conn()
     df = pd.read_sql(sql, conn)
@@ -25,3 +25,16 @@ def run_query(sql: str) -> pd.DataFrame:
     # access in all dashboard pages (e.g. df["complaint_type"] not df["COMPLAINT_TYPE"])
     df.columns = [c.lower() for c in df.columns]
     return df
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_last_refresh() -> str:
+    """Return the latest ingestion timestamp from RAW.SOCRATA_311 as a formatted string."""
+    try:
+        df = run_query("SELECT MAX(ingestion_timestamp) AS ts FROM RAW.SOCRATA_311")
+        ts = df["ts"].iloc[0]
+        if ts is None:
+            return "Unknown"
+        return str(ts)[:16]
+    except Exception:
+        return "Unknown"

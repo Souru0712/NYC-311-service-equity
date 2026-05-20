@@ -12,8 +12,14 @@ import streamlit as st
 
 from utils.snowflake_conn import run_query
 from utils.styles import inject_css
+from utils.sidebar import setup_sidebar
 
+st.set_page_config(page_title="Key Findings | NYC 311", page_icon="🔍", layout="wide")
 inject_css()
+setup_sidebar()
+
+_chart_config = {"displayModeBar": True, "displaylogo": False,
+                 "modeBarButtonsToRemove": ["select2d", "lasso2d"]}
 
 # ── Claude synthesis ──────────────────────────────────────────────────────────
 _SYNTHESIS_SYSTEM = """\
@@ -394,32 +400,53 @@ WITH quintile_avgs AS (
         AVG(CASE WHEN income_quintile = 5 THEN equity_score END) AS q5_avg
     FROM MARTS.FCT_EQUITY_SPLITS
     WHERE income_quintile IN (1, 5)
+),
+prior_year AS (
+    SELECT
+        AVG(CASE WHEN income_quintile = 1 THEN equity_score END) AS q1_avg_py,
+        AVG(CASE WHEN income_quintile = 5 THEN equity_score END) AS q5_avg_py
+    FROM MARTS.FCT_EQUITY_SPLITS
+    WHERE income_quintile IN (1, 5)
+      AND YEAR(request_month) = YEAR(CURRENT_DATE) - 2
 )
 SELECT
-    ROUND(q1_avg, 3)                            AS q1_avg_equity,
-    ROUND(q5_avg, 3)                            AS q5_avg_equity,
-    ROUND(q1_avg / NULLIF(q5_avg, 0), 2)        AS overall_ratio
-FROM quintile_avgs
+    ROUND(q.q1_avg, 3)                             AS q1_avg_equity,
+    ROUND(q.q5_avg, 3)                             AS q5_avg_equity,
+    ROUND(q.q1_avg / NULLIF(q.q5_avg, 0), 2)       AS overall_ratio,
+    ROUND(q.q1_avg - p.q1_avg_py, 3)               AS q1_delta,
+    ROUND(q.q5_avg - p.q5_avg_py, 3)               AS q5_delta,
+    ROUND((q.q1_avg / NULLIF(q.q5_avg, 0)) - (p.q1_avg_py / NULLIF(p.q5_avg_py, 0)), 2) AS ratio_delta
+FROM quintile_avgs q, prior_year p
 """
-headline_df = run_query(headline_sql)
+with st.spinner("Loading headline metrics..."):
+    headline_df = run_query(headline_sql)
 
 if not headline_df.empty:
     row = headline_df.iloc[0]
+    _q1_delta    = float(row["q1_delta"])    if row["q1_delta"]    is not None else None
+    _q5_delta    = float(row["q5_delta"])    if row["q5_delta"]    is not None else None
+    _ratio_delta = float(row["ratio_delta"]) if row["ratio_delta"] is not None else None
     col1, col2, col3 = st.columns(3)
     col1.metric(
         "Q1 avg equity score",
         f"{row['q1_avg_equity']:.2f}",
-        help="Average equity score for the lowest-income 20% of tracts. 1.0 = city average wait.",
+        delta=f"{_q1_delta:+.3f} vs 2 yrs ago" if _q1_delta is not None else None,
+        delta_color="inverse",
+        help="Average equity score for the lowest-income 20% of tracts. 1.0 = city average wait. Red delta = worsening.",
     )
     col2.metric(
         "Q5 avg equity score",
         f"{row['q5_avg_equity']:.2f}",
+        delta=f"{_q5_delta:+.3f} vs 2 yrs ago" if _q5_delta is not None else None,
+        delta_color="inverse",
         help="Average equity score for the highest-income 20% of tracts.",
     )
     col3.metric(
         "Q1 / Q5 ratio",
-        f"{row['overall_ratio']:.2f}×",
-        help="How many times longer Q1 tracts wait relative to Q5, city-wide across all complaint types.",
+        f"{row['overall_ratio']:.2f}x",
+        delta=f"{_ratio_delta:+.2f} vs 2 yrs ago" if _ratio_delta is not None else None,
+        delta_color="inverse",
+        help="How many times longer Q1 tracts wait relative to Q5. Above 1.0 = inequality exists. Rising = worsening.",
     )
 
 st.divider()
@@ -475,7 +502,8 @@ WHERE q1_avg IS NOT NULL
 ORDER BY {f1_order}
 LIMIT 10
 """
-gap_df = run_query(gap_sql)
+with st.spinner("Loading Finding 1..."):
+    gap_df = run_query(gap_sql)
 
 if not gap_df.empty:
     gap_df["agency"] = gap_df["complaint_type"].map(_AGENCY).fillna("Various")
@@ -500,20 +528,40 @@ if not gap_df.empty:
         title="Top 10 complaint types by equity gap (Q1 − Q5 avg equity score)",
     )
     fig.update_layout(coloraxis_showscale=False, yaxis_title=None)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=_chart_config)
+    st.caption(
+        "**How to read:** Each bar = one complaint type. Bar length = equity gap (Q1 avg equity minus Q5 avg equity). "
+        "Longer bar = more unequal treatment by income. The responsible agency is shown in the hover tooltip. "
+        "Low-volume types (flagged in the table below) may have unreliable gaps due to small sample sizes."
+    )
 
     st.markdown("**Details for the above complaint types:**")
-    st.table(
+    _gap_tbl = (
         gap_df[["complaint_type", "agency", "total_requests", "q1_avg_equity", "q5_avg_equity", "equity_gap"]]
         .rename(columns={
             "complaint_type": "Complaint Type",
-            "agency": "Agency",
+            "agency":         "Agency",
             "total_requests": "Total Requests",
-            "q1_avg_equity": "Q1 Avg Equity",
-            "q5_avg_equity": "Q5 Avg Equity",
-            "equity_gap": "Gap (Q1−Q5)",
+            "q1_avg_equity":  "Q1 Avg Equity",
+            "q5_avg_equity":  "Q5 Avg Equity",
+            "equity_gap":     "Gap (Q1-Q5)",
         })
-        .set_index("Complaint Type")
+    )
+    st.dataframe(
+        _gap_tbl,
+        use_container_width=True,
+        column_config={
+            "Total Requests": st.column_config.NumberColumn(format="%d", help="Fewer than 500 = low volume, gap may be noise."),
+            "Q1 Avg Equity":  st.column_config.NumberColumn(format="%.3f"),
+            "Q5 Avg Equity":  st.column_config.NumberColumn(format="%.3f"),
+            "Gap (Q1-Q5)":    st.column_config.NumberColumn(format="%.3f", help="Positive = Q1 waits longer than Q5."),
+        },
+        hide_index=True,
+    )
+    st.caption(
+        "**How to read:** Click any column header to sort. "
+        "Complaint types with fewer than 500 total requests have statistically unreliable gaps — "
+        "focus on high-volume types where the gap reflects real systemic patterns."
     )
 else:
     st.info("No data found — run the pipeline first.")
@@ -560,7 +608,8 @@ WHERE borough NOT IN ('UNSPECIFIED', '')
 GROUP BY borough, income_quintile
 ORDER BY borough, income_quintile
 """
-heatmap_df = run_query(heatmap_sql)
+with st.spinner("Loading Finding 2..."):
+    heatmap_df = run_query(heatmap_sql)
 
 if not heatmap_df.empty:
     pivot = heatmap_df.pivot(
@@ -579,7 +628,13 @@ if not heatmap_df.empty:
         title="Average equity score by borough and income quintile (1.0 = city average)",
     )
     fig.update_layout(xaxis_title="Income Quintile (Q1=lowest, Q5=highest)", yaxis_title=None)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=_chart_config)
+    st.caption(
+        "**How to read:** Each cell = avg equity score for that borough and income quintile. "
+        "Green (<=1.0) = at or below city median wait. Red (>1.0) = longer than typical. "
+        "A red-to-green gradient across a row (Q1->Q5) = income drives the gap. "
+        "A row that is entirely red regardless of quintile = the whole borough is underserved — a geographic problem, not just an income problem."
+    )
 else:
     st.info("No data found — run the pipeline first.")
 
@@ -612,7 +667,8 @@ WHERE income_quintile IN (1, 5)
 GROUP BY request_month, income_quintile
 ORDER BY request_month
 """
-trend_df = run_query(trend_sql)
+with st.spinner("Loading Finding 3..."):
+    trend_df = run_query(trend_sql)
 
 if not trend_df.empty:
     import pandas as pd
@@ -667,7 +723,7 @@ if not trend_df.empty:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         hovermode="x unified", height=480, margin=dict(t=60, b=20),
     )
-    st.plotly_chart(trend_fig, use_container_width=True)
+    st.plotly_chart(trend_fig, use_container_width=True, config=_chart_config)
 
     st.caption(
         "**How to read this chart:** "

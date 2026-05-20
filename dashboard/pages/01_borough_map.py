@@ -10,8 +10,11 @@ import streamlit as st
 
 from utils.snowflake_conn import run_query
 from utils.styles import inject_css
+from utils.sidebar import setup_sidebar
 
+st.set_page_config(page_title="Borough Map | NYC 311 Equity", page_icon="🗽", layout="wide")
 inject_css()
+setup_sidebar()
 
 # County FIPS → borough name (parsed from the 11-char census GEOID)
 _COUNTY_BOROUGH = {
@@ -169,7 +172,8 @@ else:
     """
     map_title = f"Equity Score — Income Quintile {', '.join(selected_quintile_labels)}"
 
-df = run_query(sql)
+with st.spinner("Loading map data..."):
+    df = run_query(sql)
 
 if df.empty:
     st.warning("No data for this selection.")
@@ -233,6 +237,22 @@ labels = {
     "median_household_income": "Median Income ($)",
 }
 
+# Borough-aware zoom — zoom in when a single borough is selected
+_BOROUGH_VIEW = {
+    "BRONX":         (40.845, -73.865, 12),
+    "BROOKLYN":      (40.650, -73.950, 12),
+    "MANHATTAN":     (40.783, -73.967, 12),
+    "QUEENS":        (40.728, -73.794, 12),
+    "STATEN ISLAND": (40.579, -74.152, 12),
+}
+if len(selected_boroughs) == 1:
+    _lat, _lon, _zoom = _BOROUGH_VIEW.get(selected_boroughs[0], (40.7128, -74.0060, 10))
+else:
+    _lat, _lon, _zoom = 40.7128, -74.0060, 10
+
+_chart_config = {"displayModeBar": True, "displaylogo": False,
+                 "modeBarButtonsToRemove": ["select2d", "lasso2d"]}
+
 fig = px.choropleth_mapbox(
     df,
     geojson=geojson,
@@ -242,15 +262,21 @@ fig = px.choropleth_mapbox(
     color_continuous_scale="RdYlGn_r",
     color_continuous_midpoint=1.0,
     mapbox_style="carto-positron",
-    zoom=10,
-    center={"lat": 40.7128, "lon": -74.0060},
+    zoom=_zoom,
+    center={"lat": _lat, "lon": _lon},
     opacity=0.7,
     hover_data=hover,
     labels=labels,
     title=map_title,
 )
 fig.update_layout(margin={"r": 0, "t": 40, "l": 0, "b": 0}, height=600)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, use_container_width=True, config=_chart_config)
+st.caption(
+    "**How to read:** Each polygon is a NYC census tract (~1,200–8,000 residents). "
+    "Color = equity score (tract P90 ÷ median tract P90 citywide). "
+    "🟢 Green = at or below city median. 🔴 Red = residents wait longer than the typical neighborhood. "
+    "Hover over any tract for details. Use the filter controls above to switch between complaint type and income quintile views."
+)
 
 st.caption(
     "Equity score = this tract's P90 ÷ median tract P90 citywide (equal weight per tract, not per complaint). "

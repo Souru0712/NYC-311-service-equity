@@ -11,8 +11,14 @@ import streamlit as st
 from utils.snowflake_conn import run_query
 from utils.chart_helpers import complaint_heatmap
 from utils.styles import inject_css
+from utils.sidebar import setup_sidebar
 
+st.set_page_config(page_title="Complaint Breakdown | NYC 311", page_icon="🔥", layout="wide")
 inject_css()
+setup_sidebar()
+
+_chart_config = {"displayModeBar": True, "displaylogo": False,
+                 "modeBarButtonsToRemove": ["select2d", "lasso2d"]}
 
 st.header("Complaint Type Breakdown by Borough")
 
@@ -78,7 +84,8 @@ FROM MARTS.FCT_EQUITY_SPLITS
 WHERE request_month BETWEEN '{start_date}' AND '{end_date}'
 GROUP BY borough, complaint_type
 """
-df = run_query(sql)
+with st.spinner("Loading data..."):
+    df = run_query(sql)
 
 if df.empty:
     st.warning("No data available.")
@@ -96,6 +103,13 @@ metric = _metric_map[metric_label]
 st.plotly_chart(
     complaint_heatmap(df, metric),
     use_container_width=True,
+    config=_chart_config,
+)
+st.caption(
+    "**How to read:** Rows = complaint types, Columns = boroughs. "
+    "Cell color = the selected metric for that combination. "
+    "Darker red = higher value. Compare a row across boroughs to see geographic inconsistency. "
+    "Compare a column down to see which complaint types are most problematic in that borough."
 )
 
 _metric_explanations = {
@@ -135,7 +149,12 @@ fig = px.bar(
     title="Top 10 Complaint Types by Volume (color = avg equity score)",
     labels={"total_complaints": "Total Complaints", "avg_equity": "Avg Equity Score"},
 )
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, use_container_width=True, config=_chart_config)
+st.caption(
+    "**How to read:** Bar length = total complaints citywide. "
+    "Bar color = avg equity score — 🔴 Red means the agency is slow city-wide, not just in one area. "
+    "A long red bar = high-volume + high-gap: the most urgent intervention target."
+)
 
 st.caption(
     "Bar length = total complaints filed citywide. "

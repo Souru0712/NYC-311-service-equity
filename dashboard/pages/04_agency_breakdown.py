@@ -12,8 +12,14 @@ import streamlit as st
 
 from utils.snowflake_conn import run_query
 from utils.styles import inject_css
+from utils.sidebar import setup_sidebar
 
+st.set_page_config(page_title="Agency Breakdown | NYC 311", page_icon="🏛️", layout="wide")
 inject_css()
+setup_sidebar()
+
+_chart_config = {"displayModeBar": True, "displaylogo": False,
+                 "modeBarButtonsToRemove": ["select2d", "lasso2d"]}
 
 st.header("Agency Breakdown — Volume & Equity Gap")
 st.markdown("""
@@ -133,7 +139,8 @@ FROM MARTS.FCT_EQUITY_SPLITS
 WHERE request_month BETWEEN '{start_date}' AND '{end_date}'
 GROUP BY complaint_type, income_quintile
 """
-raw = run_query(sql)
+with st.spinner("Loading agency data..."):
+    raw = run_query(sql)
 
 if raw.empty:
     st.warning("No data for this date range.")
@@ -212,26 +219,41 @@ fig = px.bar(
     },
     title="Equity Gap by Agency (Q1 avg equity score − Q5 avg equity score)",
 )
+fig.add_vline(x=0, line_dash="dash", line_color="grey", annotation_text="No gap", annotation_position="top")
 fig.update_layout(coloraxis_showscale=False, yaxis_title=None, height=600)
-st.plotly_chart(fig, use_container_width=True)
-
+st.plotly_chart(fig, use_container_width=True, config=_chart_config)
 st.caption(
-    "Each bar is one agency. Bar length = equity gap (Q1 avg equity score minus Q5 avg equity score). "
-    "A larger positive gap means the agency resolves complaints significantly slower in low-income tracts "
-    "than in high-income ones. A gap near zero means the agency serves all income levels equally — "
-    "though both may still be slow in absolute terms. Negative values mean Q5 tracts wait longer than Q1."
+    "**How to read:** Each bar is one city agency. Bar length = equity gap (Q1 avg equity − Q5 avg equity). "
+    "Bars to the right of the dashed line mean Q1 tracts wait longer than Q5 — the further right, the worse the disparity. "
+    "Bars to the left mean Q5 tracts wait longer (rare). A bar at zero means the agency serves all income levels equally."
 )
 
 # ── Summary table ─────────────────────────────────────────────────────────────
 st.markdown("**Agency summary table:**")
-st.dataframe(
+_tbl = (
     agency_table[["Agency", "total_requests", "q1_avg_equity", "q5_avg_equity", "gap"]]
     .rename(columns={
         "total_requests": "Total Requests",
         "q1_avg_equity":  "Q1 Avg Equity",
         "q5_avg_equity":  "Q5 Avg Equity",
-        "gap":            "Gap (Q1 − Q5)",
+        "gap":            "Gap (Q1 - Q5)",
     })
-    .reset_index(drop=True),
+    .reset_index(drop=True)
+)
+st.dataframe(
+    _tbl,
     use_container_width=True,
+    column_config={
+        "Total Requests": st.column_config.NumberColumn(format="%d"),
+        "Q1 Avg Equity":  st.column_config.NumberColumn(format="%.3f", help="Avg equity score for lowest-income tracts. Above 1.0 = slower than city median."),
+        "Q5 Avg Equity":  st.column_config.NumberColumn(format="%.3f", help="Avg equity score for highest-income tracts."),
+        "Gap (Q1 - Q5)":  st.column_config.NumberColumn(format="%.3f", help="Positive = Q1 waits longer. Negative = Q5 waits longer. Zero = equal service."),
+    },
+    hide_index=True,
+)
+st.caption(
+    "**How to read:** Click any column header to sort. "
+    "Total Requests = all complaints handled by this agency across all quintiles. "
+    "Q1 Avg Equity = how much longer low-income tracts wait relative to the city median. "
+    "Gap = the equity disparity between lowest and highest income areas — the most important column."
 )
