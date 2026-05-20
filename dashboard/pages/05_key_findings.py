@@ -911,6 +911,7 @@ if not gap_df.empty and not heatmap_df.empty and not trend_df.empty and not head
     cached = _load_cached_synthesis(data_hash)
 
     _dev = is_dev()
+    st.sidebar.caption(f"🔧 dev={_dev} | secret={st.secrets.get('DEV_MODE', 'NOT SET')}")
 
     if cached and cached[0] == "complete":
         # Stored and ready — display in styled callout box
