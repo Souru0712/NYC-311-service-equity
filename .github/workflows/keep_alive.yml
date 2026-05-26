@@ -10,4 +10,4 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Ping Streamlit app
-        run: curl -s -o /dev/null -w "%{http_code}" https://nyc-311-service-equity.streamlit.app/key_findings
+        run: curl -s -o /dev/null -w "%{http_code}" https://nyc-311-service-equity.streamlit.app/
